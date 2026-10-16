@@ -1,4 +1,4 @@
-﻿# Castle Story Steam Bridge
+# Castle Story Steam Bridge
 
 [English](#english) · [Українською](#українською)
 
@@ -52,6 +52,17 @@ The game talks UNET over UDP on localhost. The host side of the bridge listens a
 - Full garbage-collection pauses of the game (~0.8 s every 15-55 s with two players) still happen; the position channel hides them only when the main stream, not the whole host, is delayed.
 - Windows may warn about an "unknown publisher": the installer has no paid code-signing certificate. Updates delivered through Steam are verified by the mod's own RSA signature.
 
+### Found a bug?
+
+Please [open an issue](https://github.com/drago139/CastleStorySteamBridge/issues/new/choose). The more of this you include, the faster it can be fixed:
+
+- what happened and what you expected, and how to repeat it;
+- the mod version (shown in the F8 window title) and whether you were the host or a guest;
+- ping/connection type from F8 (`P2P` or `relay`);
+- the log file `BepInEx\LogOutput.log` from the game folder (attach it; it contains no passwords).
+
+Suggestions and questions are welcome in Issues too.
+
 ### Credits
 
 Author: **gnom**. Developed with OpenAI Codex and Claude (Anthropic). Uses BepInEx and HarmonyX.
@@ -101,6 +112,17 @@ cd Source
 - Перевірено двома акаунтами на одному ПК (Helix, Вторгнення) за штучної затримки, втрати пакетів і зависань хоста; **реальні інтернет-маршрути ще мало перевірені**.
 - Повні паузи збирача сміття гри (~0,8 с кожні 15–55 с у двох гравців) лишаються; канал позицій приховує їх лише коли затримується основний потік, а не весь хост.
 - Windows може попередити про «невідомого видавця»: у встановлювача немає платного підпису коду. Оновлення через Steam перевіряються власним RSA-підписом мода.
+
+### Знайшли баг?
+
+Будь ласка, [створіть Issue](https://github.com/drago139/CastleStorySteamBridge/issues/new/choose). Чим більше деталей, тим швидше виправлення:
+
+- що сталося, чого ви очікували і як це повторити;
+- версія мода (у заголовку вікна F8) і чи ви були хостом, чи гостем;
+- пінг і тип з'єднання з F8 (`P2P` або `relay`);
+- файл журналу `BepInEx\LogOutput.log` з папки гри (прикріпіть його; паролів у ньому немає).
+
+Пропозиції та запитання теж пишіть в Issues.
 
 ### Автори
 

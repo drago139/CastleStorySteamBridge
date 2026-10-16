@@ -1,0 +1,30 @@
+﻿name: Bug report / Повідомлення про баг
+description: Something does not work / Щось не працює
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Що сталося?
+      description: What you expected and how to repeat it. / Чого очікували і як це повторити.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Mod version / Версія мода
+      description: Shown in the F8 window title (for example 0.3.53).
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Host or guest? / Хост чи гість?
+      options: [Host / Хост, Guest / Гість, Single player / Соло]
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log / Журнал
+      description: Attach BepInEx\LogOutput.log from the game folder (drag the file here). / Прикріпіть BepInEx\LogOutput.log з папки гри.
