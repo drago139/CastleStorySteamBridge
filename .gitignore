@@ -1,0 +1,22 @@
+﻿# build output and packages
+*.dll
+*.exe
+*.zip
+*.csupdate
+*.sig
+*.log
+Components/
+SelfTest/
+TestSupport/
+WorkshopContent/
+Share/
+# secrets - never commit
+private-key.xml
+*.pfx
+*.snk
+.castlestory-signing/
+# local junk
+*.tmp
+*.bak
+*.disabled-vanilla-compat
+Thumbs.db

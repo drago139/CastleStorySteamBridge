@@ -1,0 +1,88 @@
+# Українська	English	Français
+Автоматично — мова Windows	Automatic — Windows language	Automatique — langue de Windows
+Не змінювати мову гри	Keep the game's current language	Conserver la langue actuelle du jeu
+Мова програми	App language	Langue de l'application
+Мова гри	Game language	Langue du jeu
+без змін	unchanged	inchangée
+Castle Story — програма {0}	Castle Story — app {0}	Castle Story — application {0}
+Папка оригінальної Castle Story	Original Castle Story folder	Dossier du jeu Castle Story d'origine
+Обрати…	Choose…	Choisir…
+Оберіть папку, де є Castle Story.exe	Choose the folder containing Castle Story.exe	Choisissez le dossier contenant Castle Story.exe
+Застосувати мову гри	Apply game language	Appliquer la langue du jeu
+Встановити та запустити гру	Install and launch the game	Installer et lancer le jeu
+Перевірити оновлення — Steam Workshop	Check for updates — Steam Workshop	Rechercher des mises à jour — Steam Workshop
+Тайм-аут з'єднання: 10 хвилин	Connection timeout: 10 minutes	Délai d'expiration de la connexion : 10 minutes
+Оновлення перевіряються при відкритті програми. Гру запускати не потрібно.\nПеред заміною файлів Castle Story має бути закрита.	Updates are checked when the app opens. You do not need to launch the game.\nClose Castle Story before its files are replaced.	Les mises à jour sont recherchées à l'ouverture de l'application. Il n'est pas nécessaire de lancer le jeu.\nFermez Castle Story avant le remplacement de ses fichiers.
+Після підписки Steam автоматично завантажує релізи мода.\nЦя програма застосовує перевірені оновлення у вибраній папці.	Once subscribed, Steam automatically downloads mod releases.\nThis app applies verified updates to the selected folder.	Une fois l'abonnement activé, Steam télécharge automatiquement les nouvelles versions du mod.\nCette application installe les mises à jour vérifiées dans le dossier choisi.
+Windows: {0}. Програма: {1}. Гра: {2}.	Windows: {0}. App: {1}. Game: {2}.	Windows : {0}. Application : {1}. Jeu : {2}.
+Мови Windows немає серед встановлених перекладів гри; використано доступну англійську.	The Windows language is not installed for the game; the available English translation is selected.	La langue de Windows n'est pas installée pour le jeu ; la traduction anglaise disponible est sélectionnée.
+Не вдалося зберегти вибір мови.	Could not save the language selection.	Impossible d'enregistrer le choix de langue.
+Не вдалося прочитати список мов.	Could not read the language list.	Impossible de lire la liste des langues.
+Мову гри залишено без змін.	The game's language was left unchanged.	La langue du jeu est restée inchangée.
+Мову гри змінено на {0}. Резервна копія: {1}	Game language changed to {0}. Backup: {1}	Langue du jeu changée en {0}. Sauvegarde : {1}
+Помилка	Error	Erreur
+Гра вже відкрита	The game is already running	Le jeu est déjà en cours d'exécution
+Готово	Done	Terminé
+Готово. Запускаємо Castle Story.	Done. Launching Castle Story.	Terminé. Lancement de Castle Story.
+Встановлено.\n\nРезервні копії: {0}	Installed.\n\nBackups: {0}	Installation terminée.\n\nCopies de sauvegarde : {0}
+Усі гравці також мають встановити тайм-аут 10 хвилин.	All players must also install the 10-minute timeout.	Tous les joueurs doivent également installer le délai d'expiration de 10 minutes.
+Встановлення не завершено.	Installation did not complete.	L'installation n'a pas été terminée.
+Закрийте Castle Story, потім натисніть цю кнопку знову. Збереження гри не буде перервано.	Close Castle Story, then click this button again. The game will not be interrupted while saving.	Fermez Castle Story, puis cliquez à nouveau sur ce bouton. L'enregistrement du jeu ne sera pas interrompu.
+Попередній перегляд — файли гри не змінюються.	Preview — game files will not be changed.	Aperçu — les fichiers du jeu ne seront pas modifiés.
+Гра працює або щойно закрилася. Перевірка Workshop чекає завершення гри.	The game is running or has just closed. The Workshop check will wait until it is safe to continue.	Le jeu est en cours d'exécution ou vient de se fermer. La vérification du Workshop attendra avant de continuer.
+Перевірка Workshop відкладена до закриття Castle Story.	The Workshop check is deferred until Castle Story closes.	La vérification du Workshop est reportée jusqu'à la fermeture de Castle Story.
+Спочатку обери папку Castle Story.	Choose the Castle Story folder first.	Choisissez d'abord le dossier de Castle Story.
+Шукаю авторський канал оновлень у Steam Workshop…	Finding the author's update channel in Steam Workshop…	Recherche du canal de mises à jour de l'auteur dans le Steam Workshop…
+Авторський канал оновлень ще не опублікований у Workshop.	The author's update channel has not been published in the Workshop yet.	Le canal de mises à jour de l'auteur n'a pas encore été publié dans le Workshop.
+Перевіряю підписку й оновлення у Steam Workshop…	Checking your Steam Workshop subscription and updates…	Vérification de l'abonnement et des mises à jour dans le Steam Workshop…
+Steam перевіряє та завантажує файли оновлення…	Steam is checking and downloading update files…	Steam vérifie et télécharge les fichiers de mise à jour…
+Steam не відповів на пошук оновлень.	Steam did not respond to the update search.	Steam n'a pas répondu à la recherche de mises à jour.
+Steam не відповів. Перевір з'єднання та натисни кнопку знову.	Steam did not respond. Check your connection and try again.	Steam n'a pas répondu. Vérifiez votre connexion et réessayez.
+Steam повернув іншу підписку.	Steam returned a different subscription.	Steam a renvoyé un autre abonnement.
+Завантаження ще не завершено. Перевір завантаження Steam.	The download has not finished. Check Steam's downloads.	Le téléchargement n'est pas terminé. Vérifiez les téléchargements dans Steam.
+Steam ще не встановив файли Workshop. Спробуй знову.	Steam has not installed the Workshop files yet. Try again.	Steam n'a pas encore installé les fichiers du Workshop. Réessayez.
+Пакет оновлення Workshop відсутній або некоректний.	The Workshop update package is missing or invalid.	Le paquet de mise à jour du Workshop est absent ou invalide.
+Нове оновлення готове. Закрий Castle Story — тоді файли мода оновляться.	An update is ready. Close Castle Story to update the mod files.	Une mise à jour est prête. Fermez Castle Story pour mettre à jour les fichiers du mod.
+Програма {0}. Steam перевіряється без запуску гри.	App {0}. Steam is checked without launching the game.	Application {0}. Steam est vérifié sans lancer le jeu.
+Програма {0}. Новішої підписаної версії у Workshop немає.	App {0}. No newer signed version is available in the Workshop.	Application {0}. Aucune version signée plus récente n'est disponible dans le Workshop.
+Оновлення {0} перевірене. Відкриваю нову програму…	Update {0} verified. Opening the new app…	Mise à jour {0} vérifiée. Ouverture de la nouvelle application…
+Мод оновлено до {0}. Налаштування й резервні копії збережено.	Mod updated to {0}. Settings and backups have been preserved.	Mod mis à jour vers la version {0}. Les paramètres et les copies de sauvegarde ont été conservés.
+Завантаження Workshop: {0} %	Workshop download: {0}%	Téléchargement du Workshop : {0} %
+Steam не завершив завантаження: код {0}	Steam could not finish the download: code {0}	Steam n'a pas pu terminer le téléchargement : code {0}
+Castle Story працює. Закрий гру перед встановленням або публікацією оновлення.	Castle Story is running. Close it before installing or publishing an update.	Castle Story est en cours d'exécution. Fermez le jeu avant d'installer ou de publier une mise à jour.
+Оберіть папку оригіналу, де є Castle Story.exe.	Choose the original game folder containing Castle Story.exe.	Choisissez le dossier du jeu d'origine contenant Castle Story.exe.
+Некоректна мова.	Invalid language.	Langue invalide.
+Файл налаштувань містить некоректний JSON. Файли гри не змінено.	The settings file contains invalid JSON. Game files have not been changed.	Le fichier de paramètres contient du JSON invalide. Les fichiers du jeu n'ont pas été modifiés.
+Налаштування мають бути об'єктом JSON. Файли гри не змінено.	Settings must be a JSON object. Game files have not been changed.	Les paramètres doivent être un objet JSON. Les fichiers du jeu n'ont pas été modifiés.
+Некоректний розділ localization. Файли гри не змінено.	The localization section is invalid. Game files have not been changed.	La section localization est invalide. Les fichiers du jeu n'ont pas été modifiés.
+Відкрий Steam з акаунтом, який має Castle Story, та спробуй знову.	Open Steam with an account that owns Castle Story, then try again.	Ouvrez Steam avec un compte qui possède Castle Story, puis réessayez.
+Steam підключив іншу гру.	Steam connected to a different game.	Steam s'est connecté à un autre jeu.
+Знайдено несумісну версію BepInEx. Її не змінено. Мову гри можна змінити окремою кнопкою.	An incompatible version of BepInEx was found and left unchanged. You can change the game language using the separate button.	Une version incompatible de BepInEx a été trouvée et conservée. Vous pouvez changer la langue du jeu à l'aide du bouton dédié.
+Завантажувач BepInEx відсутній або вимкнений. Файли не змінено; потрібна окрема перевірка.	The BepInEx loader is missing or disabled. Files have not been changed; a separate check is required.	Le chargeur BepInEx est absent ou désactivé. Les fichiers n'ont pas été modifiés ; une vérification distincte est nécessaire.
+BepInEx встановлений не повністю. Файли не змінено.	BepInEx is not fully installed. Files have not been changed.	L'installation de BepInEx est incomplète. Les fichiers n'ont pas été modifiés.
+Версія файлу не збігається з підписаною версією.	The file version does not match the signed version.	La version du fichier ne correspond pas à la version signée.
+З'єднання Steam перервано.	The Steam connection was interrupted.	La connexion à Steam a été interrompue.
+Некоректна версія.	Invalid version.	Version invalide.
+Некоректна відповідь Workshop.	Invalid Workshop response.	Réponse du Workshop invalide.
+Некоректний розмір пакета.	Invalid package size.	Taille du paquet invalide.
+Некоректний шлях компонента.	Invalid component path.	Chemin du composant invalide.
+Непідписана програма.	The app is not signed.	L'application n'est pas signée.
+Оберіть папку Castle Story: бібліотеку Steam не знайдено.	Choose the Castle Story folder: the Steam library was not found.	Choisissez le dossier de Castle Story : la bibliothèque Steam est introuvable.
+Пакет надто великий.	The package is too large.	Le paquet est trop volumineux.
+Пакет неповний.	The package is incomplete.	Le paquet est incomplet.
+Папка версії вже існує, її збережено.	The version folder already exists and has been preserved.	Le dossier de cette version existe déjà et a été conservé.
+Підпис автора не збігається. Поточну програму збережено.	The author's signature does not match. The current app has been preserved.	La signature de l'auteur ne correspond pas. L'application actuelle a été conservée.
+Підпис програми не підтверджено.	The app signature could not be verified.	La signature de l'application n'a pas pu être vérifiée.
+Це не пакет Steam Bridge.	This is not a Steam Bridge package.	Ce n'est pas un paquet Steam Bridge.
+Steam не повернув результат.	Steam did not return a result.	Steam n'a renvoyé aucun résultat.
+Steam не прийняв запит.	Steam did not accept the request.	Steam n'a pas accepté la requête.
+Steam не прийняв пошук каналу оновлень.	Steam did not accept the update channel search.	Steam n'a pas accepté la recherche du canal de mises à jour.
+Невідомий компонент: 	Unknown component: 	Composant inconnu : 
+У встановлювачі відсутній компонент: 	The installer is missing a component: 	Un composant manque dans le programme d'installation : 
+Контрольна сума компонента не збігається: 	Component checksum does not match: 	La somme de contrôle du composant ne correspond pas : 
+. Файли гри не змінено.	. Game files have not been changed.	. Les fichiers du jeu n'ont pas été modifiés.
+Steam відхилив запит: код 	Steam rejected the request: code 	Steam a refusé la requête : code 
+Країна / регіон	Country / region	Pays / région
+Автоматично — регіон Windows	Automatic — Windows region	Automatique — région de Windows
+Переклад гри не встановлений. Завантаж його з Workshop.	The game translation is not installed. Download it from Workshop.	La traduction du jeu n'est pas installée. Téléchargez-la depuis le Workshop.
+Переклади гри — Steam Workshop	Game translations — Steam Workshop	Traductions du jeu — Steam Workshop
