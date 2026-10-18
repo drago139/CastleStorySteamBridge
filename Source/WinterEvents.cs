@@ -13,7 +13,6 @@ namespace CastleStorySteam {
  internal sealed class WinterEvents:MonoBehaviour {
   static Material priorTerrain;static FlatWorldInitializer terrainOwner;
   Harmony patch;float next;WinterWeather weather;
-  readonly List<WinterCrystalSnow> crystals=new List<WinterCrystalSnow>();
   readonly List<WinterHat> hats=new List<WinterHat>();
   internal static bool Enabled {get{return SeasonalEvents.WinterActive&&VisualOptions.WinterSnow;}}
   void Awake(){patch=new Harmony("local.castlestory.wintervisuals");patch.Patch(AccessTools.Method(typeof(FlatWorldInitializer),"Init"),null,new HarmonyMethod(typeof(WinterEvents),"WinterTerrain"));}
@@ -30,16 +29,11 @@ namespace CastleStorySteam {
   }
   void Update(){
    // 0.3.34: FindObjectsOfType walks every object of the big world; once the crystal and the hats exist, look for newcomers rarely.
-   if(Time.realtimeSinceStartup<next)return;next=Time.realtimeSinceStartup+(hats.Count==0||crystals.Count==0?2:30);
+   if(Time.realtimeSinceStartup<next)return;next=Time.realtimeSinceStartup+(hats.Count==0?2:30);
    if(!Enabled||SceneManager.GetActiveScene().name!="ScenePrincipale"){Clear();return;}
    if(weather==null){weather=gameObject.AddComponent<WinterWeather>();}
-   crystals.RemoveAll(t=>t==null);hats.RemoveAll(t=>t==null);
+   hats.RemoveAll(t=>t==null);
    long scanStart=System.Diagnostics.Stopwatch.GetTimestamp();
-   foreach(var nest in UnityEngine.Object.FindObjectsOfType<FireflyNest>()){
-    LuaDriver driver=nest.GetComponent<LuaDriver>();
-    if(driver==null||driver.Handle!="fy_Crystal"||nest.GetComponent<WinterCrystalSnow>()!=null)continue;
-    WinterCrystalSnow c=nest.gameObject.AddComponent<WinterCrystalSnow>();c.Init(nest);crystals.Add(c);
-   }
    foreach(var bag in UnityEngine.Object.FindObjectsOfType<Brix.Game.AI.Toolbag>()){
     if(bag.Head==null||bag.Head.Limb==null||bag.GetComponent<Brix.Game.AI.Labor>()==null||bag.GetComponent<WinterHat>()!=null)continue;
     WinterHat h=bag.gameObject.AddComponent<WinterHat>();h.Init(bag);hats.Add(h);
@@ -50,7 +44,6 @@ namespace CastleStorySteam {
   int scanLogs;
   void Clear(){
    if(terrainOwner!=null&&FlatWorldInitializer.Instance==terrainOwner&&priorTerrain!=null){Voxel.Engine.RenderMaterial=priorTerrain;priorTerrain=null;terrainOwner=null;}
-   foreach(var c in crystals)if(c!=null)Destroy(c);crystals.Clear();
    foreach(var h in hats)if(h!=null)Destroy(h);hats.Clear();
    if(weather!=null)Destroy(weather);
   }

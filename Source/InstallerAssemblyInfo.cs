@@ -6,5 +6,5 @@
 [assembly: AssemblyCompany("Castle Story friends mod (non-commercial)")]
 [assembly: AssemblyProduct("Castle Story Steam Bridge")]
 [assembly: AssemblyCopyright("Community mod for personal use")]
-[assembly: AssemblyVersion("0.3.53.0")]
-[assembly: AssemblyFileVersion("0.3.53.0")]
+[assembly: AssemblyVersion("0.3.60.0")]
+[assembly: AssemblyFileVersion("0.3.60.0")]

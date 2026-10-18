@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace CastleStorySteam
 {
-    internal static class BridgeVersion { internal const string Text = "0.3.53"; }
+    internal static class BridgeVersion { internal const string Text = "0.3.60"; }
 
     // Signature check for bridge updates. The signed bytes are "<version>\0<dll bytes>", so a signed old DLL
     // cannot be re-labelled as a newer version.

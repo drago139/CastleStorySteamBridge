@@ -60,7 +60,7 @@ namespace CastleStorySteam
                 InitLoadGuard();
                 InitLobbyPing();
                 InstallDiscoveryDiag();
-                InstallTimeoutPolicy(); InstallExtrapolation(); InstallPositionLink(); InstallHitchProfiler(); InstallItemFilter();
+                InstallTimeoutPolicy(); InstallExtrapolation(); InstallPositionLink(); InstallHitchProfiler(); InstallItemFilter(); InstallPeriodicStats(); InstallReconnect(); InstallFreezeWatch(); InstallRunInBackground(); InstallDiagBundle(); InstallRadmin();
                 PatchCrateGuard();
                 PatchFixes();
                 InitGameplayFixes();

@@ -34,10 +34,10 @@ namespace CastleStorySteam {
    return false;
   }
   static Texture2D Load(Asset_Map asset) {
-   string path=Path.Combine(asset.path,"thumbnail.png");
+   string path=null;
    Texture2D texture=null;
    try {
-    FileInfo info=new FileInfo(path);
+    path=Path.Combine(asset.path,"thumbnail.png");FileInfo info=new FileInfo(path);
     if(!info.Exists || info.Length<33 || info.Length>MaxBytes)return null;
     long stamp=info.LastWriteTimeUtc.Ticks;Entry hit;
     if(cache.TryGetValue(path,out hit)&&hit.Stamp==stamp&&hit.Length==info.Length&&hit.Texture!=null) { asset.thumbnail=hit.Texture;return hit.Texture; }
@@ -52,7 +52,15 @@ namespace CastleStorySteam {
     if(hit!=null&&hit.Texture!=null)UnityEngine.Object.Destroy(hit.Texture);
     cache[path]=new Entry{Stamp=stamp,Length=info.Length,Texture=texture};
     asset.thumbnail=texture;return texture;
-   } catch(Exception) { if(texture!=null)UnityEngine.Object.Destroy(texture);return null; }
+   } catch(Exception e) { Note("read",e,asset!=null?asset.path:null);if(texture!=null)UnityEngine.Object.Destroy(texture);return null; }
+  }
+  static int noted; static BepInEx.Logging.ManualLogSource noteLog;
+  // 0.3.60: a preview problem never becomes a failed save/load; the first few are logged with the path involved.
+  static void Note(string where,Exception e,string path) {
+   try {
+    if(noted++>=5)return; if(noteLog==null)noteLog=BepInEx.Logging.Logger.CreateLogSource("SavePreview");
+    noteLog.LogWarning("Save preview "+where+" skipped: "+e.GetType().Name+": "+e.Message+"; path=["+(path??"null")+"]");
+   } catch(Exception) { }
   }
   internal static bool ValidPng(byte[] data) { return SavePreviewRules.ValidPng(data); }
   internal static Texture2D Compact(Texture2D source) {
@@ -74,7 +82,7 @@ namespace CastleStorySteam {
    try {
     small=Compact(source);
     File.WriteAllBytes(Path.Combine(__instance.path,"thumbnail.png"),small.EncodeToPNG());
-   } catch(Exception) {
+   } catch(Exception ex) { Note("write",ex,__instance.path);
     // Preview generation is optional. Keep the native world-data writer running;
     // never remove or rewrite another save's files to work around a picture.
    } finally { if(small!=null&&small!=source)UnityEngine.Object.Destroy(small); }

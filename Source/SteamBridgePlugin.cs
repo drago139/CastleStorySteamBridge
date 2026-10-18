@@ -285,7 +285,7 @@ namespace CastleStorySteam
                 foreach (var entry in guests) LogReceiveGap(entry.Key, entry.Value);
             }
             if (Input.GetKeyDown(KeyCode.F8)) visible = !visible;
-            TestFlush(); TestControlTick(); PositionLinkTick(); ItemFilterTick();
+            TestFlush(); TestControlTick(); AllocBegin(); PositionLinkTick(); AllocEnd(0); AllocBegin(); ItemFilterTick(); AllocEnd(1); AllocBegin(); PeriodicStatsTick(); AllocEnd(2); AllocBegin(); FreezeWatchTick(); AllocEnd(3); RunInBackgroundTick();
             if (Input.GetKeyDown(KeyCode.F7)) ListMapsInChat();
             try { TrackLoad(); } catch (Exception) { }
             if (!SteamManager.Initialized) return;
@@ -314,7 +314,7 @@ namespace CastleStorySteam
                 if (bridge == null) return;
                 if (host && !NetworkServer.active)
                 {
-                    StopBridge(); status = "Хост завершив гру. З'єднання закрито."; visible = true; return;
+                    StopBridge(); LeaveGameSession(); status = "Хост завершив гру. З'єднання закрито."; visible = true; return;
                 }
                 if (!host && !bridge.Ready && Time.realtimeSinceStartup >= nextHello)
                 {
@@ -409,7 +409,7 @@ namespace CastleStorySteam
         bool WatchGameSession()
         {
             float now = Time.realtimeSinceStartup;
-            if (GameClientConnected()) { sessionSeen = true; sessionGoneSince = 0; sessionGoneFrames = 0; return false; }
+            if (GameClientConnected()) { if (!sessionSeen) RememberHost(); sessionSeen = true; sessionGoneSince = 0; sessionGoneFrames = 0; return false; }
             string reason = null;
             if (sessionSeen)
             {
@@ -464,7 +464,7 @@ namespace CastleStorySteam
         {
             if (hosting) { RemoveGuest(p.m_steamIDRemote, false); DiagWarn("Guest Steam failure: " + p.m_eP2PSessionError); return; }
             if (bridge != null && p.m_steamIDRemote == peer)
-            { DiagWarn("Steam P2P failure " + p.m_eP2PSessionError); StopBridge(false); status = "Втрачено зв'язок через Steam (код " + p.m_eP2PSessionError + "). Причина виходу хоста невідома."; visible = true; }
+            { DiagWarn("Steam P2P failure " + p.m_eP2PSessionError); StopBridge(false); LeaveGameSession(); status = "Втрачено зв'язок через Steam (код " + p.m_eP2PSessionError + "). Причина виходу хоста невідома."; visible = true; }
         }
         bool Send(byte[] p)
         { return SendTo(peer, p); }
@@ -533,7 +533,7 @@ namespace CastleStorySteam
         }
         void StopBridge(bool notify = true)
         {
-            // Before teardown, while the host/client label and peer link are still valid.
+            AutoBundleOnSessionEnd(); ClearReconnectOpen(); // a clean end of the session; before teardown, while the host/client label and peer link are still valid.
             FlushStats();
             DiagShareOnExit();
             DiagEndSession();
@@ -601,6 +601,7 @@ namespace CastleStorySteam
                 DrawTestPanel();
                 if (!(offerFrom.m_SteamID != 0 || xferActive)) DrawUpdate();
                 DrawDiagnostics(false);
+                DrawDiagBundle();
                 DrawFixes();
                 GUILayout.Label(SeasonalEvents.Status);
                 VisualOptions.Draw();
@@ -613,6 +614,7 @@ namespace CastleStorySteam
                 GUILayout.Label("Хост + до 3 гравців. Підключених мостів: " + guests.Count + "; режим " + (mixedSend ? SendMixed : SendReliable));
                 ulong myCode = SteamUser.GetSteamID().m_SteamID;
                 GUILayout.Label((AllowStrangersOn ? "Код хоста для будь-кого (не лише друзів): " : "Сторонні вимкнено (AllowStrangers=false). Код: ") + myCode);
+                DrawRadminHost();
                 if (GUILayout.Button("Скопіювати код хоста")) { GUIUtility.systemCopyBuffer = myCode.ToString(); status = "Код скопійовано. Надішли його гравцеві."; }
                 scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(260));
                 foreach (KeyValuePair<CSteamID, BridgeCore> g in guests)
@@ -634,7 +636,7 @@ namespace CastleStorySteam
             }
             else if (bridge == null)
             {
-                GUILayout.Label("Для списку лобі всім потрібна 0.3.3 або новіша. Або вибери хоста вручну:");
+                DrawReconnect(); GUILayout.Label("Для списку лобі всім потрібна 0.3.3 або новіша. Або вибери хоста вручну:");
                 if (GUILayout.Button("Оновити список гравців Castle Story")) RefreshFriends();
                 scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(190));
                 foreach (CSteamID f in friends)
@@ -652,6 +654,7 @@ namespace CastleStorySteam
                     else if (typed == SteamUser.GetSteamID().m_SteamID) status = "Це твій власний код.";
                     else { peer = new CSteamID(typed); peerByCode = !IsFriend(peer); StartBridge(false); }
                 }
+                DrawRadminJoin();
                 GUILayout.Label("Хост створює лобі й дозволяє друзів. Усі входять у лобі, потім хост запускає карту.");
                 // Test switch: applies to the next bridge session; saved in BepInEx\config.
                 if (sendMode != null && GUILayout.Button("Режим надсилання: " + SendModeName() + " (натисни, щоб змінити)"))
@@ -667,7 +670,7 @@ namespace CastleStorySteam
                 if (lastData > 0) GUILayout.Label("Останні дані: " + (Time.realtimeSinceStartup - lastData).ToString("F1") + " с тому");
                 if (starvationNote != null) GUILayout.Label(starvationNote);
                 DrawDiagnostics(true);
-                if (GUILayout.Button("Зупинити міст (з'єднання гри перерветься)")) { StopBridge(); status = "Міст зупинено. Повернись у головне меню перед новою спробою."; }
+                if (GUILayout.Button("Зупинити міст (з'єднання гри перерветься)")) { bool wasClient = !host; StopBridge(); if (wasClient) LeaveGameSession(); status = "Міст зупинено. Повернись у головне меню перед новою спробою."; }
             }
             if (GUILayout.Button("Приховати — відкрити знову клавішею F8")) visible = false;
             GUI.DragWindow(new Rect(0, 0, 530, 25));

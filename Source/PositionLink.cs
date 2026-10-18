@@ -28,7 +28,7 @@ namespace CastleStorySteam
         float nextPosSend, nextPosScan; uint posSeq, posLastSeq; bool posSeqKnown;
         readonly byte[] posBuf = new byte[8 + PosMaxEntries * 16]; byte[] posRecv = new byte[2048];
         readonly List<PosEntry> posBatch = new List<PosEntry>(); readonly List<UNetTransform> posBatchT = new List<UNetTransform>();
-        int posPacketsOut, posPacketsIn, posApplied, posDroppedTest; float nextPosLog;
+        int posPacketsOut, posPacketsIn, posApplied, posDroppedTest, posLost, posLate, posWinLost, posWinGot; float nextPosLog;
         sealed class PosHeld { internal CSteamID To; internal byte[] Data; internal int Length; internal float Due; }
         readonly List<PosHeld> posHeld = new List<PosHeld>();
 
@@ -62,7 +62,7 @@ namespace CastleStorySteam
                 if (now >= nextPosLog && (posPacketsOut > 0 || posPacketsIn > 0))
                 {
                     nextPosLog = now + 30f;
-                    Logger.LogInfo("Position side channel: sent " + posPacketsOut + " packets, received " + posPacketsIn + ", applied " + posApplied + " positions" + (posDroppedTest > 0 ? ", test-dropped " + posDroppedTest : ""));
+                    Logger.LogInfo("Position side channel: sent " + posPacketsOut + " packets, received " + posPacketsIn + ", lost " + posLost + ", late " + posLate + " (" + (posPacketsIn + posLost > 0 ? (100f * posLost / (posPacketsIn + posLost)).ToString("F1") : "0") + "%), applied " + posApplied + " positions" + (posDroppedTest > 0 ? ", test-dropped " + posDroppedTest : ""));
                 }
             }
             catch (Exception e) { if (now >= nextPosScan) { nextPosScan = now + 10f; Logger.LogWarning("Position side channel: " + e.Message); } }
@@ -131,8 +131,13 @@ namespace CastleStorySteam
                 if (sender != peer || read < 8 || posRecv[0] != PosMagic) continue;
                 posPacketsIn++; dgSidePk++;
                 int o = 2; uint seq = ReadU32(posRecv, ref o); o += 2;
-                if (posSeqKnown && (int)(seq - posLastSeq) <= 0) continue;     // an older packet that arrived late
-                posSeqKnown = true; posLastSeq = seq;
+                if (posSeqKnown)
+                {
+                    int gap = (int)(seq - posLastSeq);
+                    if (gap <= 0) { posLate++; continue; }               // an older packet that arrived late
+                    if (gap > 1) { posLost += gap - 1; posWinLost += gap - 1; }   // sequence numbers that never arrived = lost on the way
+                }
+                posWinGot++; posSeqKnown = true; posLastSeq = seq;
                 int n = posRecv[1]; if (8 + n * 16 > read) continue;
                 for (int i = 0; i < n; i++)
                 {
