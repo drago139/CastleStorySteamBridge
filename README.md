@@ -10,6 +10,8 @@
 
 > Unofficial, free community mod. Not affiliated with Sauropod Studio. You need your own copy of Castle Story on Steam. This repository contains **no game files and no decompiled game code**.
 
+> **All code of this mod was written by AI** (OpenAI Codex and Claude by Anthropic). The author, gnom, set the tasks and tested the mod in the game (bug reports with videos).
+
 ### Features
 
 - **Join over the internet via Steam P2P**: friends *and* strangers (public lobbies appear in the game's "Public server list" with a `[Mod]` prefix; a host code is a fallback). Steam relay is allowed when a direct route is impossible.
@@ -68,7 +70,7 @@ Suggestions and questions are welcome in Issues too.
 
 ### Credits
 
-Author: **gnom**. Developed with OpenAI Codex and Claude (Anthropic). Uses BepInEx and HarmonyX.
+Author: **gnom** (tasks and testing). All code was written by AI: OpenAI Codex and Claude (Anthropic). Uses BepInEx and HarmonyX.
 
 ---
 
@@ -77,6 +79,8 @@ Author: **gnom**. Developed with OpenAI Codex and Claude (Anthropic). Uses BepIn
 **Castle Story Steam Bridge** — плагін BepInEx 5 для оригінальної *Castle Story* (Steam), який дає змогу заходити одне до одного через інтернет за допомогою **Steam P2P**: без IP-адрес, переадресації портів і VPN. Він тунелює мережевий трафік гри (UNET) через Steam і додає стабільність та зручності.
 
 > Неофіційний безплатний мод спільноти, не пов'язаний із Sauropod Studio. Потрібна власна копія Castle Story у Steam. У репозиторії **немає файлів гри й декомпільованого коду гри**.
+
+> **Увесь код цього мода написав ШІ** (OpenAI Codex і Claude від Anthropic). Автор, gnom, ставив завдання й тестував мод у грі (звіти про баги з відео).
 
 ### Можливості
 
@@ -132,4 +136,4 @@ cd Source
 
 ### Автори
 
-Автор: **gnom**. Створено з OpenAI Codex і Claude (Anthropic). Використовує BepInEx і HarmonyX.
+Автор: **gnom** (завдання й тестування). Увесь код написав ШІ: OpenAI Codex і Claude (Anthropic). Використовує BepInEx і HarmonyX.
