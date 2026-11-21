@@ -64,7 +64,7 @@ namespace CastleStorySteam
         {
             try
             {
-                if (!extrapolateOn || NetworkServer.active || __instance == null || __instance.UpdateOnlyOnSleep) return;
+                if (!extrapolateOn || NetworkServer.active || __instance == null || __instance.UpdateOnlyOnSleep || SmOwns(__instance)) return;
                 float now = Time.unscaledTime;
                 Vector3 real = getServerPos(__instance);
                 UnitTrack t;

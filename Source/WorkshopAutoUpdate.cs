@@ -8,33 +8,7 @@ using CastleStorySteam;
 internal static class WorkshopAutoUpdate {
  internal static string Join(params string[] parts){string path=parts[0];for(int i=1;i<parts.Length;i++)path=Path.Combine(path,parts[i]);return path;}
  internal static string SourceFolder(string game){return Path.GetFullPath(Join(game,"..","..","workshop","content","227860","3818506669"));}
- internal static string InstallHalloweenMode(string game,string sourceFolder){
-  string modeSource=Join(sourceFolder,"Info","Lua","Gamemodes","capturethepumpkin");
-  string halloweenSource=Join(sourceFolder,"Info","Lua","Mods","halloween2017");
-  if(!Directory.Exists(modeSource)&&!Directory.Exists(halloweenSource))return "";
-  string root=Path.GetFullPath(game)+Path.DirectorySeparatorChar;
-  int copied=0;
-  Action<string,string,string> copyTree=(sourceRoot,targetRoot,label)=>{
-   if(!Directory.Exists(sourceRoot))return;
-   string safeRoot=Path.GetFullPath(targetRoot)+Path.DirectorySeparatorChar;
-   foreach(string source in Directory.GetFiles(sourceRoot,"*",SearchOption.AllDirectories)){
-    string relative=source.Substring(sourceRoot.Length).TrimStart(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar);
-    string target=Path.GetFullPath(Join(safeRoot,relative));
-    if(!target.StartsWith(safeRoot,StringComparison.OrdinalIgnoreCase)||!target.StartsWith(root,StringComparison.OrdinalIgnoreCase))throw new IOException("Unsafe "+label+" path");
-    Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(source,target,true);copied++;
-   }
-  };
-  copyTree(modeSource,Join(game,"Info","Lua","Gamemodes","capturethepumpkin"),"Halloween mode");
-  copyTree(halloweenSource,Join(game,"Info","Lua","Mods","halloween2017"),"Halloween assets");
-  foreach(string language in new[]{"English","French","Ukrainian"}){
-   string source=Join(sourceFolder,"Info","Languages",language,"language.csv");
-   if(!File.Exists(source))continue;
-   string target=Path.GetFullPath(Join(game,"Info","Languages",language,"language.csv"));
-   if(!target.StartsWith(root,StringComparison.OrdinalIgnoreCase))throw new IOException("Unsafe language path");
-   Directory.CreateDirectory(Path.GetDirectoryName(target));File.Copy(source,target,true);copied++;
-  }
-  return copied>0 ? "Halloween mode and original visual assets installed" : "";
- }
+  // 0.4.23: InstallHalloweenMode removed (user: seasonal content cut). It copied Info/Lua/Gamemodes/capturethepumpkin, Info/Lua/Mods/halloween2017 and Info/Languages/{English,French,Ukrainian}/language.csv from the Workshop folder on every start.
  internal static bool AlreadyLoaded(){foreach(Assembly assembly in AppDomain.CurrentDomain.GetAssemblies()){string name=assembly.GetName().Name;if(name=="CastleStorySteamBridge"||name=="CastleStorySteamBridge-rebuilt")return true;}return false;}
  internal static bool AnotherGame(){int current;using(Process self=Process.GetCurrentProcess())current=self.Id;bool other=false;foreach(Process process in Process.GetProcessesByName("Castle Story")){try{if(process.Id!=current)other=true;}finally{process.Dispose();}}return other;}
  internal static Version DllVersion(byte[] bytes){using(MemoryStream stream=new MemoryStream(bytes))using(AssemblyDefinition assembly=AssemblyDefinition.ReadAssembly(stream)){if(assembly.Name.Name!="CastleStorySteamBridge"&&assembly.Name.Name!="CastleStorySteamBridge-rebuilt")throw new IOException("Not a Steam Bridge DLL");return assembly.Name.Version;}}

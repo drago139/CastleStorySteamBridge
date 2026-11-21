@@ -41,7 +41,7 @@ namespace CastleStorySteam
                 {
                     byte[] data = Encoding.UTF8.GetBytes("#prev\n" + LogSummary.Build(file, Path.GetFileName(file), 30000));
                     if (data.Length > BridgeCore.MaxDiagnosticsBytes) Array.Resize(ref data, BridgeCore.MaxDiagnosticsBytes);
-                    if (SendTo(id, BridgeCore.Packet(BridgeCore.KindDiagnosticsReport, data, data.Length)))
+                    if (SendBulk(id, BridgeCore.Packet(BridgeCore.KindDiagnosticsReport, data, data.Length)))
                     {
                         File.Move(file, file + ".sent");
                         previousPending.RemoveAt(i);

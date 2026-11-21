@@ -30,6 +30,10 @@ namespace CastleStorySteam
         public const byte KindMapProposal = 12;
         public const byte KindMapChoice = 13;
         public const byte KindItemFilter = 14;
+        public const byte KindPause = 15;   // 0.3.83 host pause; older bridges drop kinds above their own range
+        public const byte KindRestSync = 16;   // 0.3.85 resting thrown resources (B-050)
+        public const byte KindSyncCheck = 17;   // 0.3.86 pause state check: host digest / guest answer
+        public const byte KindSessionReport = 18;   // 0.3.89 short session report to the friend (slow lane)
         public const int MaxDiagnosticsBytes = 48 * 1024;
         public delegate void ExtraPacket(byte kind, byte[] payload);
         public ExtraPacket ExtraHandler;
@@ -70,7 +74,7 @@ namespace CastleStorySteam
             if (RemoteClosed) return;
             if (p[4] == 1 && host && count == 5) { Ready = send(Packet(2, null, 0)); return; }
             if (p[4] == 2 && !host && count == 5) { Ready = true; return; }
-            if (p[4] >= KindDiagnosticsRequest && p[4] <= KindItemFilter)
+            if (p[4] >= KindDiagnosticsRequest && p[4] <= KindSessionReport)
             {
                 // Only after the handshake; the payload is copied because the caller reuses its buffer.
                 if (!Ready || ExtraHandler == null || count - 5 > MaxDiagnosticsBytes) return;

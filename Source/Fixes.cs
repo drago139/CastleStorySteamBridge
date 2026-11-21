@@ -52,6 +52,9 @@ namespace CastleStorySteam
                 fxLabor = FxFindType("Labor");
                 if (fixWardDrop.Value) PatchWardDrop();
                 if (fixLandscape.Value) PatchLandscape();
+                PatchWardInWall();
+                PatchLooseFetch();
+                PatchSaveMapMp();
             }
             catch (Exception e) { Logger.LogWarning("Game fixes unavailable: " + e.Message); }
         }
@@ -127,7 +130,7 @@ namespace CastleStorySteam
 
         void ResetFixCaches()
         {
-            fxBlockedUntil.Clear(); fxBlockedValue.Clear(); fxFillSeen.Clear(); fxZoneCache.Clear(); fxZoneUntil = 0;
+            fxBlockedUntil.Clear(); fxBlockedValue.Clear(); fxFillSeen.Clear(); fxZoneCache.Clear(); fxZoneUntil = 0; WardInWall.Clear(); LooseFetch.Clear();
         }
         static List<FxZone> FxZones()
         {
@@ -232,6 +235,76 @@ namespace CastleStorySteam
                 __result = chosen;
             }
             catch (Exception e) { if (plugin != null) plugin.FxLog("ward drop check failed (drop unchanged): " + e.GetType().Name + " " + e.Message); }
+        }
+
+        // ------------------------------------------------------------------ 0.4.19 ward inside a wall is removed (WardInWall.cs; host only)
+
+        ConfigEntry<bool> fixWardWall, fixWardWallBlocks;
+
+        void PatchWardInWall()
+        {
+            fixWardWall = Config.Bind("Fixes", "WardInWallRemove", true, new ConfigDescription(
+                "HOST only (guests need nothing): a ward that a Bricktron dropped into a wall (the game checks no terrain there) is removed from the map: its body is inside a full voxel on two checks 1.5 s apart while it lies on the ground. false = the game's own behaviour (the ward stays inside the wall)."));
+            fixWardWallBlocks = Config.Bind("Fixes", "WardInWallBlocks", true, new ConfigDescription(
+                "With WardInWallRemove on: a full placed block (built wall) counts like terrain. false = only terrain counts (use it if a ward standing on stairs or a ramp is ever removed)."));
+            try
+            {
+                WardInWall.Install(discoveryHarmony, delegate { return fixWardWall.Value; }, delegate { return fixWardWallBlocks.Value; }, delegate(string s) { PtLog(s); });
+                string line = "Fix 'ward inside a wall is removed': WardInWallRemove=" + fixWardWall.Value + ", WardInWallBlocks=" + fixWardWallBlocks.Value + " (installed; host only)";
+                Logger.LogInfo(line); PtLog("WARD-IN-WALL " + line);
+            }
+            catch (Exception e)
+            {
+                Logger.LogWarning("Fix 'ward inside a wall is removed' skipped: " + e.Message);
+                PtLog("WARD-IN-WALL install SKIPPED: " + e.GetType().Name + " " + e.Message);
+                BugPack.Skipped.Add("Ward in wall remove");
+            }
+        }
+
+        // ------------------------------------------------------------------ 0.4.20 workers do not walk across the map for loose raw items (LooseFetch.cs; host only)
+
+        ConfigEntry<bool> fixLooseFetch; ConfigEntry<float> fixLooseFetchRadius;
+
+        void PatchLooseFetch()
+        {
+            fixLooseFetch = Config.Bind("Fixes", "LooseFetchLimit", true, new ConfigDescription(
+                "HOST only (guests need nothing): a worker that looks for material (building, crafting, catapult ammo, terrain fill) does not take loose stone blocks or logs lying on the ground (fallen from a broken stockpile or wall, felled trees) farther than LooseFetchRadius from a crystal of its own faction; it takes them from stockpiles or closer instead. Harvest / clean-up zones, stockpiles and direct orders are not affected. false = the game's own behaviour."));
+            fixLooseFetchRadius = Config.Bind("Fixes", "LooseFetchRadius", LooseFetchRules.DefaultRadius, new ConfigDescription(
+                "With LooseFetchLimit on: metres (horizontal) from the nearest own crystal; loose stone blocks and logs farther away are not fetched. 5..2000.", new AcceptableValueRange<float>(LooseFetchRules.MinRadius, LooseFetchRules.MaxRadius)));
+            try
+            {
+                LooseFetch.Install(discoveryHarmony, delegate { return fixLooseFetch.Value; }, delegate { return fixLooseFetchRadius.Value; }, delegate(string s) { PtLog(s); });
+                string line = "Fix 'workers do not fetch far loose raw items': LooseFetchLimit=" + fixLooseFetch.Value + ", LooseFetchRadius=" + fixLooseFetchRadius.Value + " m (installed; host only)";
+                Logger.LogInfo(line); PtLog("LOOSE-FETCH " + line);
+            }
+            catch (Exception e)
+            {
+                Logger.LogWarning("Fix 'workers do not fetch far loose raw items' skipped: " + e.Message);
+                PtLog("LOOSE-FETCH install SKIPPED: " + e.GetType().Name + " " + e.Message);
+                BugPack.Skipped.Add("Loose fetch limit");
+            }
+        }
+
+        // ------------------------------------------------------------------ 0.4.20 host-only "Зберегти карту" button in a multiplayer match (SaveMapMp.cs)
+
+        ConfigEntry<bool> fixSaveMapMp;
+
+        void PatchSaveMapMp()
+        {
+            fixSaveMapMp = Config.Bind("Fixes", "SaveMapInMultiplayer", true, new ConfigDescription(
+                "HOST only: in a multiplayer match the game menu (settings section, next to Screenshot) gets a 'Зберегти карту' button. Every press writes a NEW save MP_<date>_<time> (never overwrites), listed in the single-player and multiplayer load menus. Takes effect when the game menu is loaded (next match). false = no button."));
+            try
+            {
+                SaveMapMp.Install(discoveryHarmony, delegate { return fixSaveMapMp.Value; }, delegate(string s) { PtLog(s); });
+                string line = "Feature 'save map in multiplayer': SaveMapInMultiplayer=" + fixSaveMapMp.Value + " (installed; host only)";
+                Logger.LogInfo(line); PtLog("SAVE-MP " + line);
+            }
+            catch (Exception e)
+            {
+                Logger.LogWarning("Feature 'save map in multiplayer' skipped: " + e.Message);
+                PtLog("SAVE-MP install SKIPPED: " + e.GetType().Name + " " + e.Message);
+                BugPack.Skipped.Add("Save map in multiplayer");
+            }
         }
 
         // ------------------------------------------------------------------ 2) level tool must not bury items

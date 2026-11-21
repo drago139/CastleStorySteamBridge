@@ -29,7 +29,7 @@ namespace CastleStorySteam
         readonly Dictionary<int, float> notReadyKickAt = new Dictionary<int, float>();
         readonly Dictionary<int, float> duplicateSeen = new Dictionary<int, float>();
         // A not-ready guest is only removed after the host itself finished loading, waited this long, and the guest was silent this long.
-        const float HostWaitBeforeKick = 45f, SilentBeforeKick = 30f, GhostGrace = 3f;
+        const float HostWaitBeforeKick = 45f, SilentBeforeKick = 30f, GhostGrace = 3f, DirectGuestWaitBeforeKick = 300f;
 
         void InitLoadGuard()
         {
@@ -80,16 +80,16 @@ namespace CastleStorySteam
 
         void OnLoadMax(int max)
         {
-            loadActive = true; loadMax = max; loadProgress = 0;
+            loadActive = true; loadMax = max; loadProgress = 0; prLevelReadyAt = -1f;
             loadStartedAt = lastLoadProgressAt = Time.realtimeSinceStartup; hostWaitSince = 0; nextLoadLog = loadStartedAt + 10;
-            Logger.LogInfo("Loading started: " + max + " steps" + GameStateNote());
+            Logger.LogInfo("Loading started: " + max + " steps" + GameStateNote()); PerfLoadBegin(max); JoinLoadBegin();
         }
-        void OnLoadStep() { loadProgress++; lastLoadProgressAt = Time.realtimeSinceStartup; }
-        void OnLoadLeap(int n) { loadProgress += n; lastLoadProgressAt = Time.realtimeSinceStartup; }
+        void OnLoadStep() { loadProgress++; lastLoadProgressAt = Time.realtimeSinceStartup; PerfLoadStep(1); }
+        void OnLoadLeap(int n) { loadProgress += n; lastLoadProgressAt = Time.realtimeSinceStartup; PerfLoadStep(n); }
         void OnLoadLevelReady()
         {
             Logger.LogInfo("Level ready after " + (loadActive ? (Time.realtimeSinceStartup - loadStartedAt).ToString("F1") + " s" : "?") + GameStateNote());
-            loadActive = false; notReadyKickAt.Clear();
+            PerfLoadEnd(); loadActive = false; notReadyKickAt.Clear();
         }
         void OnLoadError(string error) { Logger.LogWarning("Game start error: " + error + GameStateNote()); }
         void OnLoadPlayersReady() { Logger.LogInfo("All lobby players ready; the game changes scene" + GameStateNote()); }
@@ -146,7 +146,21 @@ namespace CastleStorySteam
             if (c == null || c.hostId < 0) return -1;
             string address; int port; NetworkID network; NodeID node; byte error;
             NetworkTransport.GetConnectionInfo(c.hostId, c.connectionId, out address, out port, out network, out node, out error);
-            return error == 0 ? port : -1;
+            // Only loopback connections are bridged guests; a direct (Radmin/LAN) guest must never be matched to a bridge by port number.
+            return error == 0 && LoopbackAddress.IsLoopback(address) ? port : -1;
+        }
+
+        // True for a connection that is known to come from a non-loopback address (Radmin VPN / LAN).
+        static bool IsDirectConnection(NetworkConnection c)
+        {
+            try
+            {
+                if (c == null || c.hostId < 0) return false;
+                string address; int port; NetworkID network; NodeID node; byte error;
+                NetworkTransport.GetConnectionInfo(c.hostId, c.connectionId, out address, out port, out network, out node, out error);
+                return error == 0 && !String.IsNullOrEmpty(address) && !LoopbackAddress.IsLoopback(address);
+            }
+            catch (Exception) { return false; }
         }
 
         BridgeCore FindGuestOfUser(Brix.Game.User u, out int port)
@@ -178,6 +192,7 @@ namespace CastleStorySteam
             {
                 UNetManager m = UNetManager.instance;
                 if (m == null || !NetworkServer.active) return;
+                TraceLobbyConnections(m);
                 // (2) connections that belonged to a bridge that is gone
                 if (deadPorts.Count > 0)
                 {
@@ -237,7 +252,8 @@ namespace CastleStorySteam
                 {
                     if (u == null || u.LevelReady) continue;
                     int port; BridgeCore guest = FindGuestOfUser(u, out port);
-                    bool silent = guest == null || ReceiveAge(guest) >= SilentBeforeKick;
+                    // B-037: a guest without a bridge (Radmin/LAN direct connection) has no receive age to judge by; the old "guest == null means silent" removed slow loaders after 45 s. Give direct guests a much longer grace.
+                    bool silent = guest == null ? (!IsDirectConnection(u.connectionToClient) || now - hostWaitSince >= DirectGuestWaitBeforeKick) : ReceiveAge(guest) >= SilentBeforeKick;
                     if (!silent) continue;
                     Logger.LogWarning("Host finished loading " + (now - hostWaitSince).ToString("F0") + " s ago; removing not-ready guest " + u.ScreenName
                         + " (conn port " + port + ", " + (guest == null ? "no bridge" : "silent " + ReceiveAge(guest).ToString("F0") + " s") + ")");
@@ -246,5 +262,32 @@ namespace CastleStorySteam
             }
             catch (Exception e) { Logger.LogWarning("Host connection guard failed: " + e.Message); }
         }
+
+        // Phase12b observation only: compare native endpoint representations with bridge ports.
+        void TraceLobbyConnections(UNetManager m)
+        {
+            StringBuilder s = new StringBuilder("LOBBY-AUDIT rows=");
+            s.Append(m.LobbyPlayerList == null ? -1 : m.LobbyPlayerList.Count).Append(" bridges=").Append(guests.Count);
+            foreach (KeyValuePair<CSteamID, BridgeCore> b in guests) s.Append(" bridgePort=").Append(b.Value.Port);
+            foreach (NetworkConnection c in NetworkServer.connections)
+            {
+                if (c == null) continue;
+                string address = "local"; int port = -1; NetworkID network; NodeID node; byte error = 0;
+                if (c.hostId >= 0) NetworkTransport.GetConnectionInfo(c.hostId, c.connectionId, out address, out port, out network, out node, out error);
+                s.Append(" [conn=").Append(c.connectionId).Append(" host=").Append(c.hostId).Append(" address=").Append(c.address)
+                  .Append(" raw=").Append(address).Append(':').Append(port).Append(" error=").Append(error).Append(" matchedPort=").Append(ConnectionPort(c)).Append(']');
+            }
+            if (m.LobbyPlayerList != null) foreach (Brix.Network.LobbyPlayer row in m.LobbyPlayerList)
+            {
+                if (row == null) continue;
+                s.Append(" [row=").Append(row.netId.Value).Append(" conn=").Append(row.connectionToClient == null ? -1 : row.connectionToClient.connectionId)
+                  .Append(" local=").Append(row.isLocalPlayer).Append(']');
+            }
+            // 0.4.27 review: this line was written once a second for the whole hosting session (7495 of 9710 lines, 78 % of the bytes of a host's LogOutput.log on 2026-11-07) and crowded real events out of log tails; write it only when it changes.
+            string line = s.ToString();
+            if (line == lastLobbyAudit) return;
+            lastLobbyAudit = line; Logger.LogInfo(line);
+        }
+        string lastLobbyAudit;
     }
 }

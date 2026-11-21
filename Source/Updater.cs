@@ -48,11 +48,12 @@ namespace CastleStorySteam
             if (Time.realtimeSinceStartup < nextUpdateChunkAt) return;
             P2PSessionState_t link;
             if (SteamNetworking.GetP2PSessionState(job.Peer, out link) && link.m_nBytesQueuedForSend > 128 * 1024) return;
+            if (SlowCapable(job.Peer) && SlowQueuedFor(job.Peer) > 64 * 1024) return;   // 0.3.89: chunks wait in the slow lane, not in the game channel
             // At most one 16 KiB chunk per frame, and 20 per second; game traffic is pumped first.
             nextUpdateChunkAt = Time.realtimeSinceStartup + 0.05f;
             try
             {
-                SendTo(job.Peer, job.Packets[job.Index++]);
+                SendBulk(job.Peer, job.Packets[job.Index++]);
                 if (job.Index == job.Packets.Length) { serveJob = null; Logger.LogInfo("Signed update sent to " + PingName(job.Peer)); }
             }
             catch (Exception e) { serveJob = null; Logger.LogWarning("Update send failed: " + e.Message); }
@@ -145,6 +146,10 @@ namespace CastleStorySteam
             else if (kind == BridgeCore.KindPing || kind == BridgeCore.KindPong) OnPingPacket(from, kind, payload);
             else if (kind == BridgeCore.KindMapChoice) OnMapProposal(from, payload);
             else if (kind == BridgeCore.KindItemFilter) OnItemFilterPacket(from, payload);
+            else if (kind == KindPause) OnPausePacket(from, payload);
+            else if (kind == KindRestSync) OnRestSyncPacket(from, payload);
+            else if (kind == KindSyncCheck) OnSyncCheckPacket(from, payload);
+            else if (kind == KindSessionReport) OnSessionReportPacket(from, payload);
             else OnUpdatePacket(from, kind, payload);
         }
         void OnUpdatePacket(CSteamID from, byte kind, byte[] payload)

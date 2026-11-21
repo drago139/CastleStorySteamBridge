@@ -54,6 +54,17 @@ static class UpdateSelfTest
             dup.Accept(chunks[0], out error);
             if (dup.Accept(chunks[0], out error)) throw new Exception("Repeated chunk accepted");
         }
+        // 0.3.87: a package above the old 512 KB cap (700 KB dll) must build, parse and reassemble; the new ceiling stays enforced below.
+        {
+            byte[] bigDll = new byte[700 * 1024]; for (int i = 0; i < bigDll.Length; i++) bigDll[i] = (byte)(i * 31 + 7);
+            byte[] bigBlob = UpdatePackage.Build("0.3.87", bigDll, new byte[256]);
+            string bv; byte[] bd, bs;
+            if (bigBlob.Length <= 512 * 1024 || !UpdatePackage.Parse(bigBlob, out bv, out bd, out bs) || bd.Length != bigDll.Length || bv != "0.3.87") throw new Exception("700 KB package rejected");
+            UpdatePackage.Receiver bigRx = new UpdatePackage.Receiver(777u);
+            foreach (byte[] c in UpdatePackage.Chunks(777u, bigBlob)) if (!bigRx.Accept(c, out error)) throw new Exception("Large chunk rejected: " + error);
+            if (!bigRx.Complete || !Same(bigRx.Blob, bigBlob)) throw new Exception("Large reassembly failed");
+            if (UpdatePackage.MaxBytes != 32 * 1024 * 1024) throw new Exception("Unexpected update ceiling");
+        }
         byte[] huge = (byte[])chunks[0].Clone(); Buffer.BlockCopy(BitConverter.GetBytes(UpdatePackage.MaxBytes + 1), 0, huge, 4, 4);
         if (new UpdatePackage.Receiver(123456u).Accept(huge, out error)) throw new Exception("Oversized transfer accepted");
         if (new UpdatePackage.Receiver(123456u).Accept(new byte[12], out error) || new UpdatePackage.Receiver(123456u).Accept(null, out error)) throw new Exception("Empty chunk accepted");
@@ -70,16 +81,16 @@ static class UpdateSelfTest
                 if (calls != 0) throw new Exception("Extra packet handled before the handshake");
                 host.Receive(BridgeCore.Packet(1, null, 0));
                 if (!host.Ready) throw new Exception("Handshake failed");
-                for (byte kind = 5; kind <= 14; kind++)
+                for (byte kind = 5; kind <= BridgeCore.KindSessionReport; kind++)
                 {
                     host.Receive(BridgeCore.Packet(kind, payload3, 3));
                     if (lastKind != kind || lastLength != 3) throw new Exception("Extra packet " + kind + " not delivered");
                 }
-                if (calls != 10) throw new Exception("Unexpected extra packet count " + calls);
-                host.Receive(BridgeCore.Packet(15, payload3, 3)); host.Receive(BridgeCore.Packet(0, payload3, 3));
-                if (calls != 10) throw new Exception("Unknown kind reached the handler");
+                if (calls != 14) throw new Exception("Unexpected extra packet count " + calls);
+                host.Receive(BridgeCore.Packet(19, payload3, 3)); host.Receive(BridgeCore.Packet(0, payload3, 3));
+                if (calls != 14) throw new Exception("Unknown kind reached the handler");
                 host.Receive(BridgeCore.Packet(5, new byte[BridgeCore.MaxDiagnosticsBytes + 1], BridgeCore.MaxDiagnosticsBytes + 1));
-                if (calls != 10) throw new Exception("Oversized extra packet reached the handler");
+                if (calls != 14) throw new Exception("Oversized extra packet reached the handler");
                 if (game.Available != 0 || host.Received != 0) throw new Exception("Extra packets leaked into game traffic");
                 host.ExtraHandler = null;
                 host.Receive(BridgeCore.Packet(7, payload3, 3));

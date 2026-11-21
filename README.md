@@ -27,6 +27,17 @@
 - **Reserve route over Radmin VPN (0.3.60)**: the host sees its Radmin address in F8, a guest types it and joins through the game's own LAN connection. It does not use the Steam bridge, so the position channel, mod kick/ban and the ping meter are not active on it.
 - **Reconnect (0.3.57+)**: F8 remembers the last host and offers "Reconnect"; after a crash the window opens by itself. It does not restore the map, it only joins the host again.
 
+### New in 0.4.x (up to 0.4.28)
+
+- **Orange ward**: a craftable ward that shoots down flying barrels (its own altar recipe; it skips barrels of allied catapults).
+- **Simpler F8 window** with an always-visible Steam status line, plus join diagnostics.
+- **Unit groups** of up to 15 units.
+- **Host-side fixes, each with its own switch in the config**: loose item cleanup, a ward dropped inside a wall, material fetch range, soldiers attacking an enemy door from its free side, rescue of units stuck in the ground or left without a path (0.4.28).
+- **Kick / rejoin**: the host recycles a silent guest link when that guest says hello again; a guest waits up to 120 s for a silent host before leaving.
+- **Radmin VPN join** uses a long timeout by default.
+- **Lighter build**: heavy diagnostics are off by default; the old seasonal content (snow, Halloween) was removed.
+- For developers: an in-game test bot (`Bot*.cs`) and 31 unit-test suites (`RunUnitTests.ps1`).
+
 ### Install
 
 1. Subscribe to the [Workshop item](https://steamcommunity.com/sharedfiles/filedetails/?id=3818506669) (or download the installer from Releases), close the game.
@@ -56,6 +67,8 @@ The game talks UNET over UDP on localhost. The host side of the bridge listens a
 - Tested with two accounts on one PC (Helix, Invasion) under artificial delay, packet loss and host stalls; **not yet widely tested over real internet routes**.
 - Full garbage-collection pauses of the game (~0.8 s every 15–55 s with two players) still happen; the position channel hides them only when the main stream, not the whole host, is delayed.
 - Windows may warn about an "unknown publisher": the installer has no paid code-signing certificate. Updates delivered through Steam are verified by the mod's own RSA signature.
+- 0.4.28 is the version the author plays now. Most 0.4.x fixes were checked by unit tests and short play sessions, not by long matches; the stuck-unit rescue of 0.4.28 is new and lightly tested.
+- When you host, `[Network] AllowStrangers` is on by default and the host code shown in F8 is your public SteamID64, so anyone who has it can join (up to 3 guests). Set it to `false` to accept Steam friends only.
 
 ### Found a bug?
 
@@ -97,6 +110,17 @@ Author: **gnom** (tasks and testing). All code was written by AI: OpenAI Codex a
 - **Резервний шлях через Radmin VPN (0.3.60)**: хост бачить свою адресу Radmin у F8, гість вводить її й заходить через власне LAN-з'єднання гри. Міст Steam при цьому не використовується, тож канал позицій, кік/бан мода й вимірювач пінгу не діють.
 - **Перепідключення (0.3.57+)**: F8 пам'ятає останнього хоста й пропонує «Перепідключитися»; після вильоту гри вікно відкривається само. Карту воно не відновлює, лише допомагає знову під'єднатися до хоста.
 
+### Нове у 0.4.x (до 0.4.28)
+
+- **Помаранчевий вард**: вард, який можна скрафтити і який збиває бочки в польоті (власний рецепт на вівтарі; бочки союзних катапульт не чіпає).
+- **Простіше вікно F8** з постійним рядком стану Steam, а також діагностика приєднання.
+- **Групи юнітів** до 15 юнітів.
+- **Виправлення на боці хоста, кожне зі своїм вимикачем у конфігу**: прибирання покинутих предметів, вард, що впав у стіну, дальність походів по матеріал, атака ворожих дверей з вільного боку, порятунок юнітів, що застрягли в землі або лишилися без шляху (0.4.28).
+- **Кік / повторний вхід**: хост перестворює «мовчазне» з'єднання гостя, коли той вітається знову; гість чекає мовчазного хоста до 120 с, перш ніж вийти.
+- **Вхід через Radmin VPN** типово з довгим тайм-аутом.
+- **Легша збірка**: важка діагностика типово вимкнена; старий сезонний вміст (сніг, Геловін) прибрано.
+- Для розробників: бот-тестер у самій грі (`Bot*.cs`) і 31 набір модульних тестів (`RunUnitTests.ps1`).
+
 ### Встановлення
 
 1. Підпишіться на [елемент Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3818506669) (або візьміть встановлювач із Releases), закрийте гру.
@@ -122,6 +146,8 @@ cd Source
 - Перевірено двома акаунтами на одному ПК (Helix, Вторгнення) за штучної затримки, втрати пакетів і зависань хоста; **реальні інтернет-маршрути ще мало перевірені**.
 - Повні паузи збирача сміття гри (~0,8 с кожні 15–55 с за двох гравців) лишаються; канал позицій приховує їх лише коли затримується основний потік, а не весь хост.
 - Windows може попередити про «невідомого видавця»: у встановлювача немає платного підпису коду. Оновлення через Steam перевіряються власним RSA-підписом мода.
+- 0.4.28 — версія, на якій зараз грає автор. Більшість виправлень 0.4.x перевірено модульними тестами й короткими сесіями, а не довгими матчами; порятунок застряглих юнітів з 0.4.28 новий і мало перевірений.
+- Коли ви хост, `[Network] AllowStrangers` типово увімкнено, а код хоста у F8 — це ваш публічний SteamID64, тож зайти може будь-хто, хто його має (до 3 гостей). Поставте `false`, щоб приймати лише друзів у Steam.
 
 ### Знайшли баг?
 

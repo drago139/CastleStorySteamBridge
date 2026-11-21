@@ -12,7 +12,7 @@ namespace CastleStorySteam
         readonly Dictionary<ulong, float> bannedUntil = new Dictionary<ulong, float>();
         readonly Dictionary<ulong, string> bannedNames = new Dictionary<ulong, string>();
         CSteamID kickTarget; float kickBanMinutes; bool kickPending;
-        CSteamID unbanTarget; bool unbanPending;
+        CSteamID unbanTarget; bool unbanPending, unbanAllPending;
 
         bool IsBanned(CSteamID id)
         {
@@ -28,11 +28,21 @@ namespace CastleStorySteam
         // Main thread, start of UpdateGuests.
         void ApplyKickRequests()
         {
+            if (unbanAllPending)
+            {
+                unbanAllPending = false;
+                int n = bannedUntil.Count;
+                bannedUntil.Clear(); bannedNames.Clear();
+                status = n > 0 ? "Усіх розбанено (" + n + "). Вони можуть заходити знову: хай натиснуть «Приєднатися» ще раз." : "Заблокованих немає.";
+                Logger.LogInfo("Host moderation: unban all (" + n + ")");
+            }
             if (unbanPending)
             {
                 unbanPending = false;
+                string uname; bannedNames.TryGetValue(unbanTarget.m_SteamID, out uname);
                 bannedUntil.Remove(unbanTarget.m_SteamID); bannedNames.Remove(unbanTarget.m_SteamID);
-                status = "Блокування знято.";
+                status = "Розбанено: " + (uname ?? unbanTarget.m_SteamID.ToString()) + ". Гравець може зайти знову: хай натисне «Приєднатися» ще раз.";
+                Logger.LogInfo("Host moderation: unban " + (uname ?? unbanTarget.m_SteamID.ToString()));
             }
             if (!kickPending) return;
             kickPending = false;
@@ -44,14 +54,14 @@ namespace CastleStorySteam
                 bannedNames[id.m_SteamID] = name;
             }
             if (guests.ContainsKey(id)) RemoveGuest(id, true);    // sends goodbye, drops the bridge; the guard then drops its game connection
-            status = kickBanMinutes > 0f ? "Гравця " + name + " вигнано й заблоковано на " + (int)kickBanMinutes + " хв." : "Гравця " + name + " вигнано.";
+            status = kickBanMinutes > 0f ? "Гравця " + name + " вигнано й заблоковано на " + (int)kickBanMinutes + " хв. Скасувати: кнопка «Розбан» нижче в списку заблокованих." : "Гравця " + name + " вигнано.";
             Logger.LogInfo("Host moderation: " + status);
         }
 
         void DrawBans()
         {
             if (bannedUntil.Count == 0) return;
-            GUILayout.Label("Заблоковані гравці:");
+            GUILayout.Label("Заблоковані гравці. «Розбан» одразу пускає гравця назад (бан діє до кінця часу або до перезапуску гри):");
             List<ulong> ids = new List<ulong>(bannedUntil.Keys);
             foreach (ulong id in ids)
             {
@@ -61,9 +71,10 @@ namespace CastleStorySteam
                 string name; bannedNames.TryGetValue(id, out name);
                 GUILayout.BeginHorizontal();
                 GUILayout.Label((name ?? id.ToString()) + " — ще " + minutes + " хв");
-                if (GUILayout.Button("Зняти", GUILayout.Width(70))) { unbanTarget = new CSteamID(id); unbanPending = true; }
+                if (GUILayout.Button("Розбан", GUILayout.Width(80))) { unbanTarget = new CSteamID(id); unbanPending = true; }
                 GUILayout.EndHorizontal();
             }
+            if (ids.Count > 1 && GUILayout.Button("Розбанити всіх")) unbanAllPending = true;
         }
     }
 }

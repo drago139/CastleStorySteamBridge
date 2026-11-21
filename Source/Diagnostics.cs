@@ -44,12 +44,38 @@ namespace CastleStorySteam
             try
             {
                 if (!DiagnosticsEnabled) return;
-                autoShare = Config.Bind("Diagnostics", "AutoShare", false, new ConfigDescription(
-                    "Send this PC's network diagnostics (pauses, queue sizes, frame counts, OS/CPU/GPU/RAM names; no personal data) "
-                    + "to the friend on the other end of the bridge every 2 minutes and when the session ends. The friend's PC keeps only the latest one."));
+                // 0.3.89: on by default (new key; the old AutoShare=false entry is no longer read). Goes only to Steam friends, Steam IDs removed,
+                // on the slow lane (channel 80, <= 2 KB/s in a match) so it never queues in front of game packets.
+                autoShare = Config.Bind("Diagnostics", "AutoShareToFriend", true, new ConfigDescription(
+                    "Send this PC's bridge diagnostics (pauses, queue sizes, frame counts, OS/CPU/GPU/RAM names; no personal data, Steam IDs removed) "
+                    + "to the Steam friend on the other end of the bridge every 2 minutes and when the session ends, slowly on a separate channel. "
+                    + "The friend's PC keeps the latest one and the last 50 per friend."));
             }
             catch (Exception e) { Logger.LogWarning("Diagnostics config unavailable, auto-share stays on: " + e.Message); }
             Logger.LogInfo("Diagnostics auto-share: " + (AutoShareOn ? "on" : "off"));
+        }
+        // 0.4.25 LEAN BUILD (user: "збери без діагностики і збирача сміття"). Forces every log-only diagnostic module and the GC pacing OFF at startup, whatever an older .cfg
+        // says: each key is bound first (same section, key and type as the module that owns it) and its value is set, so the module's own later Bind returns this entry.
+        // Not touched: gameplay fixes, the GameAnalytics guard (cuts garbage), the user-visible Steam status warning, the optional [Diagnostics] TraceOverlayInput (false by default).
+        // GcProbe off also stops the Boehm free-run thread and the GC-FO reader (FoInstall needs foOk, which GpInstall sets). The values are written back to the .cfg.
+        void ApplyLeanBuild()
+        {
+            int n = 0;
+            bool prevSave = true;
+            try
+            {
+                prevSave = Config.SaveOnConfigSet; Config.SaveOnConfigSet = false;
+                string[] diagOff = { "PerfTrace", "GcProbe", "FreeRunsProbe", "LinkProbe", "QueueDiag", "PeriodicStats", "FreezeWatch", "FlailWatch", "PinkScan", "ClickLog", "ResourceScatter", "ShareSessionReport", "AutoBundle", "HitchProfiler", "ModMemForcedGc", "ModMemScene" };
+                foreach (string k in diagOff) { try { Config.Bind("Diag", k, false, "0.4.25 lean build: forced off.").Value = false; n++; } catch (Exception e) { Logger.LogWarning("LEAN: " + k + " not forced off: " + e.Message); } }
+                string[] zero = { "LuaCallStatsSeconds", "LuaLiveCensusSeconds", "MemStatsSeconds", "ModMemMinutes" };
+                foreach (string k in zero) { try { Config.Bind("Diag", k, 0, "0.4.25 lean build: forced 0 = off.").Value = 0; n++; } catch (Exception e) { Logger.LogWarning("LEAN: " + k + " not forced off: " + e.Message); } }
+                try { Config.Bind("Diag", "ShareJoinLoad", "Never", new ConfigDescription("Share technical loading samples with the connected Steam friend only. Ask prompts once; Always remembers approval; Never sends no report.", new AcceptableValueList<string>("Ask", "Always", "Never"))).Value = "Never"; n++; } catch (Exception e) { Logger.LogWarning("LEAN: ShareJoinLoad not forced off: " + e.Message); }
+                foreach (string k in new string[] { "CombatAnomalyLog", "ModInventory" }) { try { Config.Bind("Diagnostics", k, false, "0.4.25 lean build: forced off.").Value = false; n++; } catch (Exception e) { Logger.LogWarning("LEAN: " + k + " not forced off: " + e.Message); } }
+                try { Config.Bind("Fixes", "GcMinCollectIntervalSeconds", 0, "0.4.25 lean build: GC pacing forced off (vanilla).").Value = 0; n++; } catch (Exception e) { Logger.LogWarning("LEAN: GcMinCollectIntervalSeconds not forced off: " + e.Message); }
+            }
+            catch (Exception e) { Logger.LogWarning("LEAN build switches failed: " + e.Message); }
+            finally { try { Config.SaveOnConfigSet = prevSave; Config.Save(); } catch (Exception) { } }
+            Logger.LogInfo("LEAN build: " + n + " diagnostic / GC switches forced off (perf-trace, probes, stats, GC pacing). Gameplay fixes unchanged.");
         }
         void AutoShareTick()
         {
@@ -119,6 +145,15 @@ namespace CastleStorySteam
             }
             catch (Exception e) { Logger.LogWarning("Could not save diagnostics: " + e.Message); }
         }
+        // 0.3.89: auto-from-<friend>-<time>.txt for each automatic report, the last 50 per friend are kept
+        void DiagKeepHistory(string name, string text)
+        {
+            string prefix = "auto-from-" + DiagSafe(name) + "-", dir = DiagFolder();
+            WriteReportAsync(Path.Combine(dir, prefix + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".txt"), text);
+            try { string[] old = Directory.GetFiles(dir, prefix + "*.txt"); if (old.Length > 50) { Array.Sort(old, StringComparer.Ordinal); for (int i = 0; i < old.Length - 50; i++) File.Delete(old[i]); } }
+            catch (Exception e) { Logger.LogWarning("Report history cleanup failed: " + e.Message); }
+        }
+
         void WriteReportAsync(string path, string text)
         {
             System.Threading.ThreadPool.QueueUserWorkItem(delegate(object unused)
@@ -158,7 +193,7 @@ namespace CastleStorySteam
             sb.AppendLine("Прогалини ігрових даних від друга (≥ 3 с): " + diagGaps + (diagGaps == 0 ? "" : "; найдовша " + diagLongestGap.ToString("F1") + " с"));
             AppendPingReport(sb);
             AppendHealthReport(sb);
-            AppendStallReport(sb);
+            AppendStallReport(sb); sb.Append(DlSection());
             try
             {
                 sb.AppendLine("Система: " + SystemInfo.operatingSystem + "; процесор " + SystemInfo.processorType + "; відеокарта " + SystemInfo.graphicsDeviceName
@@ -190,7 +225,7 @@ namespace CastleStorySteam
             {
                 byte[] data = Encoding.UTF8.GetBytes((auto ? "#auto\n" : "") + BuildDiagnosticsReport(reason));
                 if (data.Length > BridgeCore.MaxDiagnosticsBytes) Array.Resize(ref data, BridgeCore.MaxDiagnosticsBytes);
-                return SendTo(id, BridgeCore.Packet(BridgeCore.KindDiagnosticsReport, data, data.Length));
+                return SendBulk(id, BridgeCore.Packet(BridgeCore.KindDiagnosticsReport, data, data.Length));   // 0.3.89: slow lane (channel 80)
             }
             catch (Exception e) { Logger.LogWarning("Diagnostics send failed: " + e.Message); return false; }
         }
@@ -263,6 +298,7 @@ namespace CastleStorySteam
                 else if (auto)
                 {
                     lastAutoFrom = name; lastAutoAt = Time.realtimeSinceStartup;
+                    DiagKeepHistory(name, clean.ToString());   // 0.3.89: every automatic report, not only the latest
                     Logger.LogInfo("Latest diagnostics of " + name + " saved: " + path);
                 }
                 else

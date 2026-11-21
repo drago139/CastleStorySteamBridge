@@ -11,10 +11,15 @@ namespace CastleStorySteam {
     if(File.Exists(Path.Combine(target,".steambridge-workshop-origin"))&&File.ReadAllText(Path.Combine(target,".steambridge-workshop-origin")).Trim()==id.ToString()&&File.Exists(Path.Combine(target,"meta.json")))return target;
     throw new IOException("Player map folder already exists; kept unchanged");
    }
-   string stage=Path.Combine(Path.GetDirectoryName(playerMaps),".SteamBridgeImport-"+id+"-"+Guid.NewGuid().ToString("N"));
-   CopyFolder(source,stage);
-   File.WriteAllText(Path.Combine(stage,".steambridge-workshop-origin"),id.ToString());
-   Directory.Move(stage,target);return target;
+   // 0.4.27 review: playerMaps ends with a separator ("Info/UGC/Maps/"), so GetDirectoryName returned the maps folder itself and the stage folder was created INSIDE
+   // the player maps (the game lists every folder there as a map); a failed copy or move left it there for good. Stage next to the maps folder, remove it on failure.
+   string stage=Path.Combine(Path.GetDirectoryName(playerMaps.TrimEnd('\\','/')),".SteamBridgeImport-"+id+"-"+Guid.NewGuid().ToString("N"));
+   try {
+    CopyFolder(source,stage);
+    File.WriteAllText(Path.Combine(stage,".steambridge-workshop-origin"),id.ToString());
+    Directory.Move(stage,target);
+   } catch(Exception) { try{if(Directory.Exists(stage))Directory.Delete(stage,true);}catch(Exception){} throw; }
+   return target;
   }
   static void CopyFolder(string source,string target) {
    if((File.GetAttributes(source)&FileAttributes.ReparsePoint)!=0)throw new IOException("Map folder is a link");

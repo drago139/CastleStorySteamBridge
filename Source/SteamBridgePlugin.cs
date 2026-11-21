@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Configuration;
@@ -21,6 +21,17 @@ namespace CastleStorySteam
         Callback<P2PSessionRequest_t> request;
         Callback<P2PSessionConnectFail_t> failure;
         bool visible = false, connecting, host;   // 0.3.45: the F8 window allocates garbage on every OnGUI pass, so it starts hidden
+        ConfigEntry<bool> traceOverlayInput;
+        string lastOverlayFocus = "";
+        int traceInputUntil;
+        bool overlayF8Held;
+        int overlayF8Frame = -1;
+        bool TraceOverlayInput { get { return traceOverlayInput != null && traceOverlayInput.Value; } }
+        void TraceOverlay(string where)
+        {
+            if (TraceOverlayInput) Logger.LogInfo("F8TRACE frame=" + Time.frameCount + " " + where
+                + " keyboard=" + GUIUtility.keyboardControl + " focus=" + lastOverlayFocus + " visible=" + visible);
+        }
         float nextHello, started, lastData;
         CSteamID closingPeer;
         float closeAt;
@@ -75,16 +86,25 @@ namespace CastleStorySteam
             catch (Exception e) { Logger.LogWarning("AllowStrangers config unavailable, using true: " + e.Message); }
             try { allowMixed = Config.Bind("Network", "AllowMixedSendMode", false, "Allow the Mixed send mode. Unsafe: an outage of about 5 seconds then breaks the UNet connection (NetworkError.BadMessage) and drops the player. Keep false."); }
             catch (Exception e) { Logger.LogWarning("AllowMixedSendMode config unavailable: " + e.Message); }
+            // 0.4.5: experiment switch, default true = unchanged behaviour. Steam relays a P2P session through its servers only when a direct connection cannot be made.
+            try { allowRelay = Config.Bind("Network", "AllowRelay", true, "Steam may relay P2P traffic through its servers when a direct connection cannot be made (true = as before). false = direct connections only: a peer behind a strict NAT then cannot connect at all. Needs a game restart; it only applies to sessions created afterwards (the legacy Steam API cannot FORCE the relay)."); }
+            catch (Exception e) { Logger.LogWarning("AllowRelay config unavailable, using true: " + e.Message); }
             if (sendMode != null && sendMode.Value == SendMixed && !AllowMixed) Logger.LogWarning("SendMode = Mixed is ignored (unsafe); using Reliable. Set [Network] AllowMixedSendMode = true to override.");
-            Logger.LogInfo("Send mode: " + SendModeName() + "; strangers may join by host code: " + AllowStrangersOn);
+            Logger.LogInfo("Send mode: " + SendModeName() + "; strangers may join by host code: " + AllowStrangersOn + "; Steam relay allowed: " + AllowRelayOn);
             BindDiagnosticsConfig();
-            BindTestConfig(); VisualOptions.Bind(Config);
+            traceOverlayInput = Config.Bind("Diagnostics", "TraceOverlayInput", false, "Trace F8 and overlay focus events for local diagnosis. Keep false normally.");
+            BindTestConfig();
+            try { simpleF8 = Config.Bind("Interface", "SimpleF8", true, "F8 window: simple layout with tabs (Гра / Налаштування / Діагностика) and plain-language hints. false = the old single long list. Takes effect at once, no restart."); }
+            catch (Exception e) { Logger.LogWarning("SimpleF8 config unavailable, using the simple layout: " + e.Message); }
+            try { f8HintLeft = Config.Bind("Interface", "F8HintSessions", 3, "How many game starts show the one-line hint \"press F8\" at the bottom of the screen (it ends for good once F8 was opened). 0 = never."); }
+            catch (Exception e) { Logger.LogWarning("F8HintSessions config unavailable: " + e.Message); }
         }
         // 0.3.50: Mixed (small packets without Steam retransmission) is off unless [Network] AllowMixedSendMode = true. Soak tests showed a
         // network outage of about 5 s drops those packets for good and UNet then fails with NetworkError.BadMessage and removes the player,
         // while Reliable survived outages of 35 s. Old configs that still say Mixed are therefore ignored.
-        ConfigEntry<bool> allowMixed;
+        ConfigEntry<bool> allowMixed, allowRelay;
         bool AllowMixed { get { return allowMixed != null && allowMixed.Value; } }
+        bool AllowRelayOn { get { return allowRelay == null || allowRelay.Value; } }
         string SendModeName() { return sendMode != null && sendMode.Value == SendMixed && AllowMixed ? SendMixed : SendReliable; }
         static double Lap(ref long mark)
         {
@@ -230,6 +250,17 @@ namespace CastleStorySteam
             NoteDeadGuest(b);
             b.Dispose(); guests.Remove(id); guestSince.Remove(id); versionAnnounced.Remove(id); peerVersions.Remove(id); pings.Remove(id); trafficWindows.Remove(id); closeGuests[id] = Time.realtimeSinceStartup + 2;
         }
+        // 0.4.27 review: a Steam packet larger than a bridge frame (65512 B; no bridge version sends one on channel 77) used to throw inside Update. The catch there
+        // stopped the whole bridge (a host lost every guest) and the packet stayed in Steam's queue. It is read and dropped instead, like SlowLane does on channel 80.
+        float nextOversizeLog;
+        void DropOversizedPacket(uint size)
+        {
+            byte[] skip = size <= 2 * 1024 * 1024 ? new byte[size] : steamReceiveBuffer; uint read; CSteamID from;
+            SteamNetworking.ReadP2PPacket(skip, (uint)skip.Length, out read, out from, Channel);   // a buffer smaller than the packet truncates it (Steam API); either way it leaves the queue
+            if (Time.realtimeSinceStartup < nextOversizeLog) return;
+            nextOversizeLog = Time.realtimeSinceStartup + 30f;
+            Logger.LogWarning("Dropped an oversized Steam packet on the bridge channel: " + size + " B from " + from);
+        }
         void UpdateGuests()
         {
             ApplyKickRequests();
@@ -241,18 +272,19 @@ namespace CastleStorySteam
             uint size;
             for (int i = 0; i < 768 && SteamNetworking.IsP2PPacketAvailable(out size, Channel); i++)
             {
-                if (size > 65512) throw new InvalidOperationException("Завеликий пакет Steam.");
+                if (size > 65512) { DropOversizedPacket(size); continue; }   // 0.4.27 review: was a throw; Update's catch then stopped the host bridge for every guest
                 byte[] data = steamReceiveBuffer; uint read; CSteamID sender;
                 if (!SteamNetworking.ReadP2PPacket(data, size, out read, out sender, Channel) || read != size) continue;
                 statSteamIn++;
-                if (!IsTrusted(sender)) continue;
+                if (!IsTrusted(sender)) { HostDropLog(sender, "packet"); continue; }
                 BridgeCore b;
                 if (!guests.TryGetValue(sender, out b))
                 {
                     if (size != 5 || data[0] != 67 || data[1] != 83 || data[2] != 83 || data[3] != 1 || data[4] != 1) continue;
                     b = Guest(sender);
                 }
-                if (b == null) continue;
+                else if (read == 5 && data[4] == 1 && HostRecyclesOnHello(sender, b)) b = Guest(sender);   // 0.4.17: the guest came back; its old bridge still held the old UNET connection
+                if (b == null) { HostDropLog(sender, "hello"); continue; }
                 // A hello is a new join attempt (e.g. the friend restarted after a crash before this
                 // host noticed): restart the reliable join window for it.
                 if (read == 5 && data[4] == 1) guestSince[sender] = Time.realtimeSinceStartup;
@@ -266,6 +298,7 @@ namespace CastleStorySteam
         }
         void Update()
         {
+            if (diagOnly) { UpdateDiagnosticsOnly(); return; }
             RetireLegacyTrials();
             float now = Time.realtimeSinceStartup;
             if (DiagnosticsEnabled && (bridge != null || hosting) && lastUpdateAt > 0 && now - lastUpdateAt > 1 && now >= nextPauseLog)
@@ -284,10 +317,18 @@ namespace CastleStorySteam
                 if (bridge != null) LogReceiveGap(peer, bridge);
                 foreach (var entry in guests) LogReceiveGap(entry.Key, entry.Value);
             }
-            if (Input.GetKeyDown(KeyCode.F8)) visible = !visible;
-            TestFlush(); TestControlTick(); AllocBegin(); PositionLinkTick(); AllocEnd(0); AllocBegin(); ItemFilterTick(); AllocEnd(1); AllocBegin(); PeriodicStatsTick(); AllocEnd(2); AllocBegin(); FreezeWatchTick(); AllocEnd(3); RunInBackgroundTick();
+            if (TraceOverlayInput && (Input.GetKeyDown(KeyCode.F8) || Input.GetKey(KeyCode.F8) || Input.GetKeyUp(KeyCode.F8) || Time.frameCount <= traceInputUntil))
+                TraceOverlay("Update down=" + Input.GetKeyDown(KeyCode.F8) + " held=" + Input.GetKey(KeyCode.F8) + " up=" + Input.GetKeyUp(KeyCode.F8));
+            // Focused IMGUI can hide Input.GetKey even while the physical key is held.
+            // Poll only F8 while latched; missed KeyUp/focus transitions recover on physical release.
+            if (overlayF8Held && !OverlayPhysicalF8Down()) overlayF8Held = false;
+            if (Input.GetKeyDown(KeyCode.F8)) ToggleBridgeWindow();
+            ClickLogTick();
+            DiagBundleTick();
+            TreeCutGuard.Tick(); TestFlush(); TestControlTick(); AllocBegin(); PositionLinkTick(); AllocEnd(0); AllocBegin(); ItemFilterTick(); AllocEnd(1); AllocBegin(); PeriodicStatsTick(); AllocEnd(2); AllocBegin(); FreezeWatchTick(); AllocEnd(3); RunInBackgroundTick(); GroupsMenuTick(); UnitGroupsTick(); BorderlessTick(); FreeCursorTick(); GuestDigTick(); CatapultCensusTick(); SysDiagTick(); VirtualPlayerTick(); BotTick(); QueueDiagTick(); LinkProbeTick(); LinkWatchdogTick(); GuestHoldTick(); RadminWatchTick(); ModMemTick(); HostPauseTick(); PauseResyncTick(); TimeSyncTick(); SlowLaneTick(); SessionShareTick(); RestSyncTick(); ResourceScatterLog.Tick(); LuaPruneTick(); LuaLiveCensusTick(); AllocCutTick(); PerfFrameTick(); PinkScanTick(); StockFillTick(); FlailWatchTick(); BuriedRescueTick(); FloatLogTick(); InfiniteCatapultTick(); MemStatsTick(); LuaCallStatsTick(); TextureLimitTick(); ChaosBotTick(); SentinelTargets.Poll();
             if (Input.GetKeyDown(KeyCode.F7)) ListMapsInChat();
             try { TrackLoad(); } catch (Exception) { }
+            JoinLoadTick();
             if (!SteamManager.Initialized) return;
             long mark = System.Diagnostics.Stopwatch.GetTimestamp(), frameStart = mark;
             bool active = bridge != null || hosting;
@@ -298,6 +339,7 @@ namespace CastleStorySteam
                 {
                     request = Callback<P2PSessionRequest_t>.Create(OnRequest);
                     failure = Callback<P2PSessionConnectFail_t>.Create(OnFailure);
+                    InstallSteamJoinTrace();
                     RefreshFriends();
                     Logger.LogInfo("Steam Bridge ready; F8 opens controls. No game assemblies modified.");
                 }
@@ -324,7 +366,7 @@ namespace CastleStorySteam
                 uint size;
                 for (int i = 0; i < 256 && SteamNetworking.IsP2PPacketAvailable(out size, Channel); i++)
                 {
-                    if (size > 65512) { throw new InvalidOperationException("Завеликий пакет Steam."); }
+                    if (size > 65512) { DropOversizedPacket(size); continue; }   // 0.4.27 review: was a throw that stopped the bridge and left the game session
                     byte[] data = steamReceiveBuffer;
                     uint read; CSteamID sender;
                     if (!SteamNetworking.ReadP2PPacket(data, size, out read, out sender, Channel)) continue;
@@ -382,7 +424,7 @@ namespace CastleStorySteam
                     status = "Гравець підключений. F8 приховує вікно моду.";
                 if (!bridge.Ready && !host && Time.realtimeSinceStartup - started > 35)
                 {
-                    StopBridge(); status = "Друг не відповів за 35 с. Перевірте мод і вибір друга на обох ПК.";
+                    SteamJoinNoAnswerDiag(Time.realtimeSinceStartup - started); StopBridge(); status = "Друг не відповів за 35 с. Перевірте мод і вибір друга на обох ПК." + (OfflineStatusHint().Length > 0 ? " " + OfflineStatusHint() : "");
                 }
             }
             catch (Exception e) { Logger.LogError(e); StopBridge(); status = "Міст зупинено: " + e.Message; visible = true; }
@@ -452,9 +494,11 @@ namespace CastleStorySteam
         }
         void OnRequest(P2PSessionRequest_t p)
         {
+            if (JoinLoadAcceptRequest(p.m_steamIDRemote)) { SteamNetworking.AcceptP2PSessionWithUser(p.m_steamIDRemote); return; }
             if (hosting)
             {
                 if (Guest(p.m_steamIDRemote) != null) SteamNetworking.AcceptP2PSessionWithUser(p.m_steamIDRemote);
+                else HostDropLog(p.m_steamIDRemote, "P2P session request");
                 return;
             }
             if (bridge != null && p.m_steamIDRemote == peer && (IsFriend(peer) || peerByCode))
@@ -462,9 +506,17 @@ namespace CastleStorySteam
         }
         void OnFailure(P2PSessionConnectFail_t p)
         {
-            if (hosting) { RemoveGuest(p.m_steamIDRemote, false); DiagWarn("Guest Steam failure: " + p.m_eP2PSessionError); return; }
+            if (WatchdogFailureIsOurs(p.m_steamIDRemote, p.m_eP2PSessionError.ToString())) return;   // 0.4.15: the session the watchdog just reopened failed to come up; do not end the game session for that
+            if (hosting)
+            {
+                // 0.4.27 review: DiagWarn never logs (DiagnosticsEnabled is false), so a guest removed here left no trace in the host's LogOutput.log
+                if (guests.ContainsKey(p.m_steamIDRemote)) Logger.LogWarning("Steam P2P failure " + p.m_eP2PSessionError + " for guest " + p.m_steamIDRemote + ": its bridge is removed, the guest has to join again");
+                RemoveGuest(p.m_steamIDRemote, false); DiagWarn("Guest Steam failure: " + p.m_eP2PSessionError); return;
+            }
             if (bridge != null && p.m_steamIDRemote == peer)
-            { DiagWarn("Steam P2P failure " + p.m_eP2PSessionError); StopBridge(false); LeaveGameSession(); status = "Втрачено зв'язок через Steam (код " + p.m_eP2PSessionError + "). Причина виходу хоста невідома."; visible = true; }
+            { if (GuestHoldsOnFailure(p.m_eP2PSessionError.ToString())) return;   // 0.4.17: a running session waits for the host (cfg Network/GuestHoldOnP2PFailureSeconds)
+              Logger.LogWarning("Steam P2P failure " + p.m_eP2PSessionError + " for the host " + peer + ": leaving the session");   // 0.4.27 review: was DiagWarn only, which never logs
+              DiagWarn("Steam P2P failure " + p.m_eP2PSessionError); StopBridge(false); LeaveGameSession(); status = "Втрачено зв'язок через Steam (код " + p.m_eP2PSessionError + "). Причина виходу хоста невідома."; visible = true; }
         }
         bool Send(byte[] p)
         { return SendTo(peer, p); }
@@ -492,7 +544,7 @@ namespace CastleStorySteam
             if (!SteamNetworking.SendP2PPacket(recipient, p, (uint)length, unreliable ? EP2PSend.k_EP2PSendUnreliable : EP2PSend.k_EP2PSendReliable, Channel))
                 throw new InvalidOperationException("Steam не прийняв пакет.");
             statSteamOut++;
-            if (unreliable) statUnreliable++;
+            if (unreliable) statUnreliable++; else QdCountOut(length);
             return true;
         }
         void StartBridge(bool asHost)
@@ -508,7 +560,7 @@ namespace CastleStorySteam
                     if (UNetManager.instance == null || !NetworkServer.active) throw new InvalidOperationException("Спочатку створи багатокористувацьке лобі.");
                     hostingPort = UNetManager.instance.networkPort; hosting = true;
                     DiagBeginSession();
-                    SteamNetworking.AllowP2PPacketRelay(true);
+                    SteamNetworking.AllowP2PPacketRelay(AllowRelayOn);
                     status = "Хост активний: дозволено гравцям Steam. До 4 гравців разом із хостом.";
                     Logger.LogInfo("Multi-client host ready; game port=" + hostingPort + "; send mode=" + SendModeName()); return;
                 }
@@ -519,8 +571,9 @@ namespace CastleStorySteam
                 if (UNetManager.instance == null) throw new InvalidOperationException("Дочекайся головного меню гри.");
                 if (asHost && !NetworkServer.active) throw new InvalidOperationException("Спочатку створи багатокористувацьке лобі.");
                 if (!asHost && NetworkClient.active) throw new InvalidOperationException("Спочатку вийди в головне меню.");
-                SteamNetworking.AllowP2PPacketRelay(true);
+                SteamNetworking.AllowP2PPacketRelay(AllowRelayOn);
                 host = asHost; connecting = false; started = Time.realtimeSinceStartup; nextHello = 0; lastData = 0;
+                PosNewSession();   // 0.4.27 review: a new session with the SAME host kept the old sequence number, so the first position packet counted every packet the host sent to others since the last session as lost (loss 99 %, +1 tick smoothing delay for about 40 s); verify: also drops the old packets still queued on the position channel
                 ResetSessionWatch(); connectingSince = 0;
                 bridge = new BridgeCore(host, UNetManager.instance.networkPort, Send, delegate(byte[] buf, int n) { return SendRangeTo(peer, buf, n); });
                 CSteamID diagPeer = peer;
@@ -528,12 +581,19 @@ namespace CastleStorySteam
                 DiagBeginSession();
                 status = host ? "Очікую вибраного друга через Steam. Залишайся в лобі." : "Очікую відповіді моду друга через Steam...";
                 Logger.LogInfo("Steam Bridge mode=" + (host ? "host" : "client") + " UDP loopback=" + bridge.Port + "; send mode=" + SendModeName());
+                if (!host) SteamJoinStartDiag();
             }
             catch (Exception e) { StopBridge(); status = e.Message; Logger.LogError(e); }
         }
         void StopBridge(bool notify = true)
         {
-            AutoBundleOnSessionEnd(); ClearReconnectOpen(); // a clean end of the session; before teardown, while the host/client label and peer link are still valid.
+            SessionShareOnStop();   // 0.3.89: last report while the links still exist
+            ClearLobbyHostData();
+            // Capture only bounded metadata before teardown; all archive IO runs afterwards.
+            BundleSnapshot bundle = null;
+            try { if (fzActive) EndFreeze(Time.realtimeSinceStartup); bundle = CaptureBundle(false); }
+            catch (Exception e) { Logger.LogWarning("Diagnostics snapshot failed: " + e.Message); }
+            ClearReconnectOpen();
             FlushStats();
             DiagShareOnExit();
             DiagEndSession();
@@ -554,6 +614,7 @@ namespace CastleStorySteam
             starvedWindows = 0; starvationNote = starvationBanner = null; clientLastSent = clientLastReceived = 0; CancelUpdateTransfers();
             FailModalJoin();
             ResetProposals();
+            AutoBundleOnSessionEnd(bundle);
         }
         void RefreshFriends()
         {
@@ -582,31 +643,124 @@ namespace CastleStorySteam
             GUI.color = new Color(1f, 0.85f, 0.2f, 1f); GUI.Label(r, starvationBanner, bannerStyle);
             GUI.color = old;
         }
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern short GetAsyncKeyState(int key);
+        static bool OverlayPhysicalF8Down()
+        {
+            try { return (GetAsyncKeyState(0x77) & 0x8000) != 0; }
+            catch (Exception) { return Input.GetKey(KeyCode.F8); }
+        }
+        bool releaseBridgeFocus;
+        Rect joinCodeRect;
+        void ToggleBridgeWindow()
+        {
+            // IMGUI can own F8 before Update. Both paths share one press latch.
+            if (overlayF8Held || overlayF8Frame == Time.frameCount) return;
+            overlayF8Held = true;
+            overlayF8Frame = Time.frameCount;
+            if (visible) HideBridgeWindow(); else visible = true;
+            TraceOverlay("Toggled");
+        }
+        void HandleOverlayKey()
+        {
+            Event e = Event.current;
+            if (e.keyCode != KeyCode.F8) return;
+            if (e.type == EventType.KeyUp && !OverlayPhysicalF8Down()) overlayF8Held = false;
+            if (e.type != EventType.KeyDown) return;
+            ToggleBridgeWindow();
+            e.Use();
+        }
+        void HideBridgeWindow()
+        {
+            visible = false;
+            GUIUtility.keyboardControl = 0;
+            releaseBridgeFocus = true;
+        }
+        void ReleaseBridgeFocus()
+        {
+            GUIUtility.keyboardControl = 0;
+            GUI.FocusControl(null);
+            releaseBridgeFocus = false;
+        }
         void OnGUI()
         {
-            DrawSocialOverlay();
-            if (!visible) { DrawBanner(); return; }
-            box = GUILayout.Window(227877, box, Draw, "Castle Story — Steam Bridge " + BridgeVersion.Text + " / F8");
+            if (diagOnly) { OnGuiDiagnosticsOnly(); BotOnGui(); return; }
+            BotOnGui();   // 0.4.10 in-game bot: one status line while a run is active
+            if (TraceOverlayInput)
+            {
+                lastOverlayFocus = GUI.GetNameOfFocusedControl();
+                Event inputEvent = Event.current;
+                if (inputEvent.isKey || inputEvent.type == EventType.MouseDown || inputEvent.type == EventType.MouseUp)
+                {
+                    TraceOverlay("OnGUI type=" + inputEvent.type + " raw=" + inputEvent.rawType + " key=" + inputEvent.keyCode);
+                    if (inputEvent.keyCode == KeyCode.F8) traceInputUntil = Time.frameCount + 2;
+                }
+            }
+            HandleOverlayKey();
+            if (releaseBridgeFocus) ReleaseBridgeFocus();
+            DrawJoinLoadConsent();
+            DrawSocialOverlay(); DrawUnitGroups(); DrawGroupsMenu(); SentinelTargets.DrawBox();
+            try { DrawPauseBanner(); } catch (Exception) { }
+            if (!visible) { DrawBanner(); DrawF8Hint(); return; }
+            F8HintDone();
+            box = GUILayout.Window(227877, box, Draw, "Castle Story — Steam Bridge " + BridgeVersion.Text + " (build " + BridgeVersion.Build + ") / F8");
             ItemFilterGui();
         }
         bool showMore;
+        Vector2 overlayContentScroll;
+        GUIStyle overlayButtonStyle, overlayToggleStyle, overlayLabelStyle;
         void Draw(int id)
         {
+            // Long hints/toggles must wrap, otherwise their minimum width stretches scroll content.
+            GUIStyle button = GUI.skin.button, toggle = GUI.skin.toggle, label = GUI.skin.label;
+            if (overlayButtonStyle == null)
+            {
+                overlayButtonStyle = new GUIStyle(button); overlayButtonStyle.wordWrap = true;
+                overlayToggleStyle = new GUIStyle(toggle); overlayToggleStyle.wordWrap = true;
+                overlayLabelStyle = new GUIStyle(label); overlayLabelStyle.wordWrap = true;
+            }
+            // Layout is calculated after the callback. Entries must retain wrapped style objects.
+            try { GUI.skin.button = overlayButtonStyle; GUI.skin.toggle = overlayToggleStyle; GUI.skin.label = overlayLabelStyle; DrawContent(id); }
+            finally { GUI.skin.button = button; GUI.skin.toggle = toggle; GUI.skin.label = label; }
+        }
+        void DrawContent(int id)
+        {
+            if (TraceOverlayInput)
+            {
+                lastOverlayFocus = GUI.GetNameOfFocusedControl();
+                if (Event.current.isKey || Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseUp)
+                    TraceOverlay("Draw type=" + Event.current.type + " key=" + Event.current.keyCode);
+            }
+            HandleOverlayKey();
+            // Simple layout: a shorter window (the scroll view still scrolls); the classic one keeps its 800 px.
+            float maxContentHeight = SimpleF8 ? (f8Tab == 0 ? 470f : 640f) : 800f;
+            overlayContentScroll = GUILayout.BeginScrollView(overlayContentScroll, GUILayout.Width(510), GUILayout.Height(Math.Max(180f, Math.Min(maxContentHeight, Screen.height - box.y - 65f))));
+            // A scroll view otherwise measures unconstrained content and creates a horizontal bar.
+            GUILayout.BeginVertical(GUILayout.Width(480));
+            // Let the target button finish MouseUp before releasing window/text focus.
+            bool releaseAfterClick = Event.current.type == EventType.MouseUp && !joinCodeRect.Contains(Event.current.mousePosition)
+                && GUI.GetNameOfFocusedControl() == "CSBJoinCode";
+            if (SimpleF8) DrawSimpleBody();
+            else
+            {
             GUILayout.Label(status);
+            DrawSteamStatusWarning();
             DrawPing();
             if (offerFrom.m_SteamID != 0 || xferActive) DrawUpdate();
-            if (GUILayout.Button((showMore ? "▾ " : "▸ ") + "Додатково: оновлення, діагностика, візуальні ефекти, предмети")) showMore = !showMore;
+            if (GUILayout.Button((showMore ? "▾ " : "▸ ") + "Додатково: оновлення, діагностика, предмети")) showMore = !showMore;
             if (showMore)
             {
                 DrawTestPanel();
                 if (!(offerFrom.m_SteamID != 0 || xferActive)) DrawUpdate();
                 DrawDiagnostics(false);
+                DrawJoinLoad();
                 DrawDiagBundle();
+                DrawBorderless();
                 DrawFixes();
-                GUILayout.Label(SeasonalEvents.Status);
-                VisualOptions.Draw();
+                DrawGroupsSettings();
                 if (GUILayout.Button("Предмети будівництва (вимкнути непотрібні, з картинками)...")) ItemFilter.WindowOpen = !ItemFilter.WindowOpen;
                 if (NetworkCompat.Status.Length > 0) GUILayout.Label(NetworkCompat.Status);
+                if (ModInventory.F8Line.Length > 0) GUILayout.Label(ModInventory.F8Line);   // 0.4.14 MOD-INV (a cached string)
             }
             if (!SteamManager.Initialized) GUILayout.Label("Запусти Steam і оригінальну гру зі своєї бібліотеки.");
             else if (hosting)
@@ -615,6 +769,7 @@ namespace CastleStorySteam
                 ulong myCode = SteamUser.GetSteamID().m_SteamID;
                 GUILayout.Label((AllowStrangersOn ? "Код хоста для будь-кого (не лише друзів): " : "Сторонні вимкнено (AllowStrangers=false). Код: ") + myCode);
                 DrawRadminHost();
+                DrawHostPauseButton();
                 if (GUILayout.Button("Скопіювати код хоста")) { GUIUtility.systemCopyBuffer = myCode.ToString(); status = "Код скопійовано. Надішли його гравцеві."; }
                 scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(260));
                 foreach (KeyValuePair<CSteamID, BridgeCore> g in guests)
@@ -646,7 +801,9 @@ namespace CastleStorySteam
                 if (GUILayout.Button("Я хост: дозволити до 3 друзів Steam")) StartBridge(true);
                 if (GUILayout.Button("Приєднатися до вибраного хоста через Steam")) { peerByCode = false; StartBridge(false); }
                 GUILayout.Label("Або за кодом хоста (працює і з не-друзями):");
+                GUI.SetNextControlName("CSBJoinCode");
                 joinCode = GUILayout.TextField(joinCode ?? "", 20);
+                if (Event.current.type == EventType.Repaint) joinCodeRect = GUILayoutUtility.GetLastRect();
                 if (GUILayout.Button("Приєднатися за кодом"))
                 {
                     ulong typed;
@@ -672,11 +829,17 @@ namespace CastleStorySteam
                 DrawDiagnostics(true);
                 if (GUILayout.Button("Зупинити міст (з'єднання гри перерветься)")) { bool wasClient = !host; StopBridge(); if (wasClient) LeaveGameSession(); status = "Міст зупинено. Повернись у головне меню перед новою спробою."; }
             }
-            if (GUILayout.Button("Приховати — відкрити знову клавішею F8")) visible = false;
+            if (GUILayout.Button("Приховати — відкрити знову клавішею F8")) { HideBridgeWindow(); ReleaseBridgeFocus(); }
+            }
+            GUILayout.EndVertical();
+            GUILayout.EndScrollView();
             GUI.DragWindow(new Rect(0, 0, 530, 25));
+            if (releaseAfterClick) ReleaseBridgeFocus();
         }
         void OnDestroy()
         {
+            ShutdownJoinLoad(); PtFlush(); DxShutdown();
+            ShutdownGroupsMenu();
             ShutdownGameplayFixes();
             CancelSocialDownload();
             if (mapDownloadResult != null) mapDownloadResult.Unregister();

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
+using System.Threading;
 using BepInEx;
 using BepInEx.Configuration;
 using UnityEngine;
@@ -16,6 +17,9 @@ namespace CastleStorySteam
     public sealed partial class SteamBridgePlugin
     {
         ConfigEntry<bool> autoBundleEntry; int bundledEvents; float lastBundleAt = -1000f; string bundleStatus = "";
+        readonly object bundleLock = new object(); bool bundleWorking; BundleResult bundleResult;
+        sealed class BundleSnapshot { internal string Root, ConfigPath, Info, LatestFreeze, JoinLoad; internal int Events; internal bool Manual; }
+        sealed class BundleResult { internal string Path, Error; internal BundleSnapshot Snapshot; }
 
         void InstallDiagBundle()
         {
@@ -29,13 +33,39 @@ namespace CastleStorySteam
             if (!string.IsNullOrEmpty(bundleStatus)) GUILayout.Label(bundleStatus);
         }
 
-        void AutoBundleOnSessionEnd()
+        BundleSnapshot CaptureBundle(bool manual)
+        {
+            StringBuilder info = new StringBuilder();
+            info.Append("Castle Story Steam Bridge ").Append(BridgeVersion.Text).Append(" build ").Append(BridgeVersion.Build).Append("\r\nCreated: ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")).Append(manual ? " (button)" : " (automatic, after freezes)").Append("\r\n");
+            info.Append("Role: ").Append(hosting ? "host" : (bridge != null ? "guest" : "none")).Append("; freeze events this run: ").Append(fzEvents).Append("\r\n");
+            info.Append("OS: ").Append(Environment.OSVersion).Append("; RAM free ").Append(FreeRamMb()).Append(" MB; game uptime ").Append((int)Time.realtimeSinceStartup).Append(" s\r\n");
+            info.Append("CPU: ").Append(SystemInfo.processorType).Append("; GPU: ").Append(SystemInfo.graphicsDeviceName).Append("; RAM MB: ").Append(SystemInfo.systemMemorySize).Append("\r\n");
+            info.Append("The files contain Steam IDs and friend names. The archive was NOT sent anywhere; share it only if you want to.\r\n");
+            return new BundleSnapshot { Root = Paths.BepInExRootPath, ConfigPath = Config.ConfigFilePath, Info = info.ToString(), LatestFreeze = fzLatestEntry, Events = fzEvents, Manual = manual, JoinLoad = JoinLoadReport() };
+        }
+
+        void DiagBundleTick()
+        {
+            BundleResult result;
+            lock (bundleLock) { result = bundleResult; bundleResult = null; }
+            if (result == null) return;
+            if (result.Path != null)
+            {
+                lastBundleAt = Time.realtimeSinceStartup;
+                if (!result.Snapshot.Manual) bundledEvents = Math.Max(bundledEvents, result.Snapshot.Events);
+                bundleStatus = "Збережено: " + result.Path;
+            }
+            else bundleStatus = "Не вдалося створити ZIP: " + result.Error;
+        }
+
+        void AutoBundleOnSessionEnd(BundleSnapshot snapshot)
         {
             try
             {
-                if (autoBundleEntry == null || !autoBundleEntry.Value || fzEvents <= bundledEvents) return;
+                DiagBundleTick();
+                if (snapshot == null || autoBundleEntry == null || !autoBundleEntry.Value || snapshot.Events <= bundledEvents) return;
                 if (Time.realtimeSinceStartup - lastBundleAt < 60f) return;
-                bundledEvents = fzEvents; MakeDiagBundle(false);
+                QueueDiagBundle(snapshot);
             }
             catch (Exception) { }
         }
@@ -62,14 +92,36 @@ namespace CastleStorySteam
             catch (Exception) { return null; }
         }
 
-        string MakeDiagBundle(bool manual)
+        void MakeDiagBundle(bool manual)
         {
+            try { DiagBundleTick(); QueueDiagBundle(CaptureBundle(manual)); }
+            catch (Exception e) { bundleStatus = "Не вдалося створити ZIP: " + e.Message; Logger.LogWarning("Diagnostics snapshot failed: " + e.Message); }
+        }
+
+        void QueueDiagBundle(BundleSnapshot snapshot)
+        {
+            lock (bundleLock) { if (bundleWorking) return; bundleWorking = true; }
+            bundleStatus = "Створення ZIP...";
+            BepInEx.Logging.ManualLogSource log = Logger;
             try
             {
-                lastBundleAt = Time.realtimeSinceStartup;
-                string root = Paths.BepInExRootPath; List<KeyValuePair<string, byte[]>> files = new List<KeyValuePair<string, byte[]>>();
-                string[] names = { "LogOutput.log", "freeze-events.txt", "hitch-profile.txt" };
-                foreach (string n in names) { byte[] d = ReadTail(Path.Combine(root, n), 900 * 1024); if (d != null) files.Add(new KeyValuePair<string, byte[]>(n, d)); }
+                if (!ThreadPool.QueueUserWorkItem(delegate(object ignored)
+                {
+                    BundleResult result = new BundleResult { Snapshot = snapshot };
+                    try { result.Path = WriteDiagBundle(snapshot); log.LogInfo("Diagnostics bundle saved: " + result.Path); }
+                    catch (Exception e) { result.Error = e.Message; log.LogWarning("Diagnostics bundle failed: " + e.Message); }
+                    finally { lock (bundleLock) { bundleResult = result; bundleWorking = false; } }
+                })) throw new InvalidOperationException("Could not queue diagnostics worker.");
+            }
+            catch (Exception) { lock (bundleLock) bundleWorking = false; throw; }
+        }
+
+        static string WriteDiagBundle(BundleSnapshot snapshot)
+        {
+                // Worker: paths and immutable metadata only; no Unity, Steam or config access.
+                string root = snapshot.Root; List<KeyValuePair<string, byte[]>> files = new List<KeyValuePair<string, byte[]>>();
+                string[] names = { "LogOutput.log", "freeze-events.txt", "freeze-events.1.txt", "hitch-profile.txt", "perf-trace.txt", "perf-trace.1.txt" };
+                foreach (string n in names) { byte[] d = ReadTail(Path.Combine(root, n), 16 * 1024 * 1024); if (d != null) files.Add(new KeyValuePair<string, byte[]>(n, d)); }
                 string diagDir = Path.Combine(root, "SteamBridgeDiagnostics");
                 if (Directory.Exists(diagDir))
                 {
@@ -77,22 +129,24 @@ namespace CastleStorySteam
                     reports.Sort(delegate(FileInfo a, FileInfo b) { return b.LastWriteTime.CompareTo(a.LastWriteTime); });
                     for (int i = 0; i < reports.Count && i < 3; i++) { byte[] d = ReadTail(reports[i].FullName, 700 * 1024); if (d != null) files.Add(new KeyValuePair<string, byte[]>("diagnostics/" + reports[i].Name, d)); }
                 }
-                try { byte[] cfg = ReadTail(Config.ConfigFilePath, 64 * 1024); if (cfg != null) files.Add(new KeyValuePair<string, byte[]>("config.cfg", cfg)); } catch (Exception) { }
-                StringBuilder info = new StringBuilder();
-                info.Append("Castle Story Steam Bridge ").Append(BridgeVersion.Text).Append("\r\nCreated: ").Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")).Append(manual ? " (button)" : " (automatic, after freezes)").Append("\r\n");
-                info.Append("Role: ").Append(hosting ? "host" : (bridge != null ? "guest" : "none")).Append("; freeze events this run: ").Append(fzEvents).Append("\r\n");
-                info.Append("OS: ").Append(Environment.OSVersion).Append("; RAM free ").Append(FreeRamMb()).Append(" MB; game uptime ").Append((int)Time.realtimeSinceStartup).Append(" s\r\n");
-                info.Append("The files contain Steam IDs and friend names. The archive was NOT sent anywhere; share it only if you want to.\r\n");
-                files.Add(new KeyValuePair<string, byte[]>("info.txt", Encoding.UTF8.GetBytes(info.ToString())));
+                if (!string.IsNullOrEmpty(snapshot.JoinLoad)) files.Add(new KeyValuePair<string, byte[]>("JOINLOAD.txt", Encoding.UTF8.GetBytes(snapshot.JoinLoad)));
+                foreach (string pattern in new string[] { "joinload-local-*.txt", "peer-joinload-*.txt" })
+                {
+                    if (!Directory.Exists(diagDir)) continue;
+                    FileInfo[] reports = new DirectoryInfo(diagDir).GetFiles(pattern);
+                    Array.Sort(reports, delegate(FileInfo a, FileInfo b) { return b.LastWriteTime.CompareTo(a.LastWriteTime); });
+                    for (int i = 0; i < reports.Length && i < 5; i++) { byte[] d = ReadTail(reports[i].FullName, 16384); if (d != null) files.Add(new KeyValuePair<string, byte[]>("diagnostics/" + reports[i].Name, d)); }
+                }
+                byte[] cfg = ReadTail(snapshot.ConfigPath, 64 * 1024); if (cfg != null) files.Add(new KeyValuePair<string, byte[]>("config.cfg", cfg));
+                files.Add(new KeyValuePair<string, byte[]>("info.txt", Encoding.UTF8.GetBytes(snapshot.Info)));
+                // Preserve the newest event even if its asynchronous log append is pending.
+                if (!string.IsNullOrEmpty(snapshot.LatestFreeze)) files.Add(new KeyValuePair<string, byte[]>("latest-freeze.txt", Encoding.UTF8.GetBytes(snapshot.LatestFreeze)));
                 string dir = Path.Combine(DownloadsFolder(), "CastleStorySteamBridge-diagnostics"); Directory.CreateDirectory(dir);
-                string path = Path.Combine(dir, "diagnostics-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-v" + BridgeVersion.Text + ".zip");
+                string path = Path.Combine(dir, (snapshot.Manual ? "diagnostics-" : "diagnostics-auto-") + DateTime.Now.ToString("yyyyMMdd-HHmmss-fff") + "-v" + BridgeVersion.Text + ".zip");
                 WriteZip(path, files);
-                try { string[] old = Directory.GetFiles(dir, "diagnostics-*.zip"); Array.Sort(old); for (int i = 0; i < old.Length - 5; i++) File.Delete(old[i]); } catch (Exception) { }
-                bundleStatus = "Збережено: " + path;
-                Logger.LogInfo("Diagnostics bundle saved: " + path);
+                // Only automatic bundles belong to the retention policy. Preserve all manual and legacy archives.
+                try { string[] old = Directory.GetFiles(dir, "diagnostics-auto-*.zip"); Array.Sort(old, StringComparer.Ordinal); for (int i = 0; i < old.Length - 5; i++) File.Delete(old[i]); } catch (Exception) { }
                 return path;
-            }
-            catch (Exception e) { bundleStatus = "Не вдалося створити ZIP: " + e.Message; Logger.LogWarning("Diagnostics bundle failed: " + e.Message); return null; }
         }
 
         static uint[] crcTable;

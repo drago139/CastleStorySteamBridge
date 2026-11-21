@@ -22,12 +22,14 @@
   }
   void InitGameplayFixes() {
    if (gameplayFixes == null) gameplayFixes = new CastleStoryGameplayFixes(Config, Logger);
-   if(GetComponent<SeasonalEvents>()==null){SeasonalEvents.Log=delegate(string text){Logger.LogInfo(text);};gameObject.AddComponent<SeasonalEvents>();}
+   // 0.4.23 (user: seasonal content cut): SeasonalEvents / Winter* / VisualOptions deleted; only the halloween2017 Lua-mod blocker stays (LegacyModBlock.cs)
+   try { LegacyModBlock.Install(); Logger.LogInfo("Old Halloween 2017 Lua mod is skipped (pumpkin moon off)."); }
+   catch(System.Exception e) { LegacyModBlock.Shutdown(); Logger.LogWarning("Legacy mod block unavailable: "+e.Message); }
    try { LoggerAssemblyFix.Install(); Logger.LogInfo("Optional logger initialization uses existing game assemblies."); }
    catch(System.Exception e) { LoggerAssemblyFix.Shutdown(); Logger.LogWarning("Logger assembly guard unavailable: "+e.Message); }
    try { SavePreviewFix.Install(); Logger.LogInfo("Save preview protection ready: compact save pictures; optional image errors do not stop save data."); }
    catch(System.Exception e) { SavePreviewFix.Shutdown(); Logger.LogWarning("Save preview protection unavailable: "+e.Message); }
   }
-  void ShutdownGameplayFixes() { LoggerAssemblyFix.Shutdown(); SavePreviewFix.Shutdown(); if (gameplayFixes != null) { gameplayFixes.Dispose(); gameplayFixes = null; } }
+  void ShutdownGameplayFixes() { LoggerAssemblyFix.Shutdown(); SavePreviewFix.Shutdown(); LegacyModBlock.Shutdown(); if (gameplayFixes != null) { gameplayFixes.Dispose(); gameplayFixes = null; } }
  }
 }

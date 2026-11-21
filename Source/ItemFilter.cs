@@ -27,7 +27,9 @@ namespace CastleStorySteam
         static readonly List<Entry> catalog = new List<Entry>(); static bool catalogTried;
         internal static HashSet<string> Local = new HashSet<string>(StringComparer.Ordinal);
         internal static HashSet<string> Remote;   // set while connected to a host that sent a list
-        static ConfigEntry<string> cfg;
+        static ConfigEntry<string> cfg; static ConfigEntry<bool> stableSlots;
+        // [Fixes] StableRecipeSlots (default true): a blocked class kit keeps its place in the station recipe list and its slot button is hidden, so the keys Y U I O H keep their slots.
+        internal static bool StableSlots { get { return stableSlots == null || stableSlots.Value; } }
         internal static bool WindowOpen; static Rect window = new Rect(620, 60, 640, 560); static Vector2 scroll; static bool changed; internal static float ChangedAt;
         internal static Action<string> Log;
         internal static string Applied = "";
@@ -36,6 +38,7 @@ namespace CastleStorySteam
         {
             cfg = c.Bind("Items", "Disabled", "", "Comma-separated ids of construction-menu items switched off (set them in the F8 window, 'Предмети').");
             Local = Parse(cfg.Value);
+            stableSlots = c.Bind("Fixes", "StableRecipeSlots", true, "Blocked class kits keep their slot in the recipe list (the slot button is hidden) instead of being cut out, so the hotkeys of the other slots do not shift. false = old behaviour (cut out of the list).");
         }
         internal static HashSet<string> Parse(string text)
         {
@@ -61,8 +64,11 @@ namespace CastleStorySteam
                 string code = __result as string; if (code == null || file == null) return;
                 string f = file.Replace('\\', '/'); bool match = false;
                 for (int i = 0; i < Files.GetLength(0); i++) if (f.EndsWith("/" + Files[i, 0], StringComparison.OrdinalIgnoreCase) || f.EndsWith(Files[i, 0], StringComparison.OrdinalIgnoreCase)) match = true;
-                if (f.EndsWith("Meta_Operable.lua", StringComparison.OrdinalIgnoreCase)) { __result = FilterOperable(code, f); return; }
+                if (f.EndsWith("/GameMenu.lua", StringComparison.OrdinalIgnoreCase)) ModInventory.Anchor("ItemFilter.StableSlots", "GameMenu.lua", "slot Visible line", ModInventoryRules.AnchorCount(code, RecipeSlotRules.Anchor), true);   // 0.4.14 MOD-INV (exact file: the title menus end in GameMenu.lua too)
+                if (f.EndsWith("GameMenu.lua", StringComparison.OrdinalIgnoreCase)) { if (StableSlots) __result = HideBlockedSlots(code, f); return; }
+                if (f.EndsWith("Meta_Operable.lua", StringComparison.OrdinalIgnoreCase)) { if (!StableSlots) __result = FilterOperable(code, f); return; }
                 if (!match) return;
+                ModInventory.Anchor("ItemFilter.Hide", f.Substring(f.LastIndexOf('/') + 1), "local _t = {}", ModInventoryRules.AnchorCount(code, "local _t = {}"), false);   // 0.4.14 MOD-INV
                 HashSet<string> off = Effective; if (off.Count == 0) { Applied = ""; return; }
                 string[] lines = code.Split('\n'); int hidden = 0;
                 for (int i = 0; i < lines.Length; i++)
@@ -75,10 +81,33 @@ namespace CastleStorySteam
                 int lt = joined.IndexOf("local _t = {}", StringComparison.Ordinal);
                 if (lt < 0) return;
                 joined = joined.Substring(0, lt) + "local _t = {} _t.AddHidden = function(k, v) _t[k] = v end" + joined.Substring(lt + "local _t = {}".Length);
-                __result = joined; Applied = (Applied.Length > 0 ? Applied + "; " : "") + f.Substring(f.LastIndexOf('/') + 1) + ": " + hidden;
+                __result = joined; NoteApplied(f.Substring(f.LastIndexOf('/') + 1), hidden);
                 if (Log != null) Log("Items: hidden " + hidden + " item(s) in " + f + " (" + (Remote != null ? "host's list" : "own list") + ").");
             }
             catch (Exception e) { if (Log != null) Log("Items: filter failed: " + e.Message); }
+        }
+
+        // 0.4.27 review: Applied only ever grew while the list was not empty (one more "file: N" entry per filtered file at every map load and for every Lua script that
+        // loads it), so after a few matches the "already hidden" note in the window pushed the list and the Close button out of the window. One entry per file now: the latest.
+        static void NoteApplied(string key, int n)
+        {
+            string[] old = Applied.Split(new string[] { "; " }, StringSplitOptions.RemoveEmptyEntries); List<string> keep = new List<string>();
+            foreach (string p in old) if (!p.StartsWith(key + ": ", StringComparison.Ordinal)) keep.Add(p);
+            keep.Add(key + ": " + n); Applied = string.Join("; ", keep.ToArray());
+        }
+
+        // StableRecipeSlots: hide the slot button of every blocked class kit in GameMenu.lua (the recipe list itself stays as it is).
+        static string HideBlockedSlots(string code, string f)
+        {
+            HashSet<string> off = Effective; if (off.Count == 0) return code;
+            int n; string patched = RecipeSlotRules.PatchGameMenu(code, off, out n);
+            if (n > 0)
+            {
+                NoteApplied("класи", n);
+                if (Log != null) Log("Items: STABLE-SLOTS kept the recipe slots, hid " + n + " blocked class kit slot(s) (" + (Remote != null ? "host's list" : "own list") + ").");
+            }
+            else if (Log != null) Log("Items: STABLE-SLOTS found no slot anchor in " + f + " (nothing hidden).");
+            return patched;
         }
 
         static string FilterOperable(string code, string f)
@@ -90,7 +119,7 @@ namespace CastleStorySteam
                 string c2 = code.Replace(r + ", ", "").Replace(", " + r, "").Replace(r + ",", "").Replace(r, "");
                 if (c2 != code) { code = c2; n++; }
             }
-            if (n > 0) { Applied = (Applied.Length > 0 ? Applied + "; " : "") + "класи: " + n; if (Log != null) Log("Items: forbidden " + n + " brickton class kit(s) (" + (Remote != null ? "host's list" : "own list") + ")."); }
+            if (n > 0) { NoteApplied("класи", n); if (Log != null) Log("Items: forbidden " + n + " brickton class kit(s) (" + (Remote != null ? "host's list" : "own list") + ")."); }
             return code;
         }
 

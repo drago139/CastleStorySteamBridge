@@ -225,46 +225,14 @@ static class Setup
                         bool patch = name == "BepInEx/patchers/CastleStoryWorkshopUpdate.dll";   // 0.3.43: the timeout is set per connection by the plugin; the global patcher is never installed
                         bool runtime = name.StartsWith("BepInEx/core/", StringComparison.Ordinal)
                             || name == "winhttp.dll" || name == "doorstop_config.ini";
-                        bool halloweenMode = name.StartsWith("Info/Lua/Gamemodes/capturethepumpkin/", StringComparison.Ordinal)
-                            || name == "Info/Languages/English/language.csv"
-                            || name == "Info/Languages/French/language.csv"
-                            || name == "Info/Languages/Ukrainian/language.csv";
-                        if (entry.Name.Length == 0 || !(patch || halloweenMode || (!existingRuntime && runtime))) continue;
+                        if (entry.Name.Length == 0 || !(patch || (!existingRuntime && runtime))) continue;   // 0.4.23: the dead capturethepumpkin / language.csv filter removed (runtime.zip has no Info/ entries)
                         using (Stream source = entry.Open())
                         using (MemoryStream output = new MemoryStream())
                         { source.CopyTo(output); tx.Put(name.Replace('/', Path.DirectorySeparatorChar), output.ToArray()); }
                     }
                 }
             }
-            using (MemoryStream bytes = new MemoryStream(Resource("capturethepumpkin.zip")))
-            using (ZipArchive zip = new ZipArchive(bytes, ZipArchiveMode.Read))
-            {
-                foreach (ZipArchiveEntry entry in zip.Entries)
-                {
-                    string name = entry.FullName.Replace('\\', '/');
-                    bool mode = name.StartsWith("Info/Lua/Gamemodes/capturethepumpkin/", StringComparison.Ordinal);
-                    bool language = name == "Info/Languages/English/language.csv"
-                        || name == "Info/Languages/French/language.csv"
-                        || name == "Info/Languages/Ukrainian/language.csv";
-                    if (entry.Name.Length == 0 || (!mode && !language)) continue;
-                    using (Stream source = entry.Open())
-                    using (MemoryStream output = new MemoryStream())
-                    { source.CopyTo(output); tx.Put(name.Replace('/', Path.DirectorySeparatorChar), output.ToArray()); }
-                }
-            }
-            using (MemoryStream bytes = new MemoryStream(Resource("halloween2017.zip")))
-            using (ZipArchive zip = new ZipArchive(bytes, ZipArchiveMode.Read))
-            {
-                foreach (ZipArchiveEntry entry in zip.Entries)
-                {
-                    string name = entry.FullName.Replace('\\', '/');
-                    bool halloweenAssets = name.StartsWith("Info/Lua/Mods/halloween2017/", StringComparison.Ordinal);
-                    if (entry.Name.Length == 0 || !halloweenAssets) continue;
-                    using (Stream source = entry.Open())
-                    using (MemoryStream output = new MemoryStream())
-                    { source.CopyTo(output); tx.Put(name.Replace('/', Path.DirectorySeparatorChar), output.ToArray()); }
-                }
-            }
+            // 0.4.23 (user: seasonal content cut): capturethepumpkin.zip and halloween2017.zip are no longer shipped or installed. Nothing already installed is deleted.
             if (selectedLanguage=="Українська")
             {
                 tx.Put(Path.Combine("Info", "Languages", "Ukrainian", "language.csv"), Resource("uk.csv"));
@@ -341,7 +309,7 @@ static class Setup
         StringBuilder oldLog = new StringBuilder();
         for (int i = 0; i < 80; i++) oldLog.AppendLine("filler line " + i + " with C:\\Users\\Someone\\file.txt");
         oldLog.AppendLine("[Warning:Castle Story Steam Bridge (experimental)] Main game loop pause: 4.50 s; bridge work in previous frame 0.1 ms");
-        oldLog.AppendLine("[Warning:Castle Story Steam Bridge (experimental)] Game data gap: peer=76561199438669841; age=4.0 s; sent=10; received=20");
+        oldLog.AppendLine("[Warning:Castle Story Steam Bridge (experimental)] Game data gap: peer=76561190000000001; age=4.0 s; sent=10; received=20");
         oldLog.AppendLine("NullReferenceException");
         File.WriteAllText(Path.Combine(root, "Castle Story_Data", "output_log.txt"), oldLog.ToString());
         string settings = "{\"network\":{\"Port\":3000},\"localization\":{\"language\":\"english\"},\"other\":42}";
@@ -356,7 +324,7 @@ static class Setup
         string[] rescued = Directory.GetFiles(Path.Combine(root, "BepInEx", "SteamBridgeDiagnostics", "previous"), "*-output_log.txt");
         if (rescued.Length != 1) throw new Exception("Previous log was not saved");
         string summary = CastleStorySteam.LogSummary.Build(rescued[0], "selftest", 30000);
-        if (!summary.Contains("Main game loop pause 1") || !summary.Contains("Game data gap 1") || !summary.Contains("NullReferenceException 1") || summary.Contains("76561199438669841") || summary.Contains("Someone") || summary.Length > 30000) throw new Exception("Log summary test failed");
+        if (!summary.Contains("Main game loop pause 1") || !summary.Contains("Game data gap 1") || !summary.Contains("NullReferenceException 1") || summary.Contains("76561190000000001") || summary.Contains("Someone") || summary.Length > 30000) throw new Exception("Log summary test failed");
         byte[] core = File.ReadAllBytes(Path.Combine(root, "BepInEx", "core", "BepInEx.dll"));
         Install(root, true, true, false);
         if (Convert.ToBase64String(core) != Convert.ToBase64String(File.ReadAllBytes(Path.Combine(root, "BepInEx", "core", "BepInEx.dll")))) throw new Exception("Existing runtime was replaced");

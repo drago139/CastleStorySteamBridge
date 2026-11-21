@@ -94,6 +94,8 @@ namespace CastleStorySteam
             }
         }
 
+        string fzLatestEntry;
+
         void EndFreeze(float now)
         {
             fzActive = false; fzEvents++;
@@ -104,7 +106,8 @@ namespace CastleStorySteam
             if (cause.Length == 0) cause.Append("UNKNOWN");
             string line = "FREEZE t=" + (int)fzStart + "s dur=" + (fzLastBad - fzStart + 0.0f).ToString("F2") + "s repeats=" + fzRepeats + " cause=" + cause
                 + " worstFrame=" + (int)(fzWorstFrame * 1000f) + "ms worstSilence=" + fzWorstRx.ToString("F1") + "s maxQueue=" + fzMaxQueue + "B ramFree=" + fzRamAtStart + "MB peer=" + fzPeer + " role=" + (hosting ? "host" : "guest") + " " + LinkPathNow() + " posLostTotal=" + posLost;
-            WriteFreezeLine(line + "\r\n" + fzRing, false);
+            fzLatestEntry = line + "\r\n" + fzRing;
+            WriteFreezeLine(fzLatestEntry, false);
             Logger.LogWarning(line);
         }
 
@@ -132,7 +135,7 @@ namespace CastleStorySteam
             if (alsoLog) Logger.LogWarning(text);
             ThreadPool.QueueUserWorkItem(delegate(object o)
             {
-                try { lock (fzFileLock) File.AppendAllText(path, payload, Encoding.UTF8); } catch (Exception) { }
+                try { lock (fzFileLock) RollingTrace.Append(path, payload, RollingTrace.SegmentBytes); } catch (Exception) { }
             });
         }
 

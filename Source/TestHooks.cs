@@ -13,7 +13,7 @@ namespace CastleStorySteam
         sealed class HeldPacket { internal CSteamID To; internal byte[] Data; internal int Length; internal float Due; }
         ConfigEntry<bool> testEnabled;
         readonly List<HeldPacket> held = new List<HeldPacket>();
-        float testHolUntil, testDelaySeconds, testStallUntil, testDropUntil, testLossPercent; readonly System.Random testRng = new System.Random(12345); int testDropped;
+        float testJitterSeconds, testLastDue, testMainDelaySeconds; float testHolUntil, testDelaySeconds, testStallUntil, testDropUntil, testLossPercent; readonly System.Random testRng = new System.Random(12345); int testDropped;
         int testHeldTotal;
 
         void BindTestConfig()
@@ -39,17 +39,45 @@ namespace CastleStorySteam
                 HeldPacket r = new HeldPacket(); r.To = recipient; r.Length = length; r.Data = new byte[length]; Buffer.BlockCopy(p, 0, r.Data, 0, length); r.Due = Math.Max(now + testDelaySeconds, now + 0.3f); held.Add(r); testHeldTotal++; return true;
             }
             bool stalled = now < testStallUntil || now < testHolUntil || (now < testDropUntil && !unreliable);
-            if (!stalled && testDelaySeconds <= 0f && held.Count == 0) return false;
+            if (!stalled && testDelaySeconds <= 0f && testJitterSeconds <= 0f && testMainDelaySeconds <= 0f && held.Count == 0) return false;
             HeldPacket h = new HeldPacket();
             h.To = recipient; h.Length = length; h.Data = new byte[length]; Buffer.BlockCopy(p, 0, h.Data, 0, length);
-            h.Due = Math.Max(now + testDelaySeconds, Math.Max(Math.Max(testStallUntil, testHolUntil), testDropUntil));
+            h.Due = Math.Max(now + testDelaySeconds + testMainDelaySeconds + (float)testRng.NextDouble() * testJitterSeconds, Math.Max(Math.Max(testStallUntil, testHolUntil), testDropUntil)); if (h.Due < testLastDue) h.Due = testLastDue; testLastDue = h.Due;   // reliable stream keeps its order
             held.Add(h); testHeldTotal++;
             return true;
         }
 
+        // 0.3.82: shared by test-control.txt and the virtual player 'net' command.
+        internal void ApplyTestControl(string key, float value, float now)
+        {
+            if (key == "delay_ms") { testDelaySeconds = Math.Max(0f, value) / 1000f; Logger.LogInfo("TEST: delay set to " + (int)value + " ms"); }
+            else if (key == "trace_f8") { traceOverlayInput.Value = value > 0; Logger.LogInfo("TEST: F8 trace " + (value > 0)); }
+            else if (key == "capture") { string path=System.IO.Path.Combine(BepInEx.Paths.BepInExRootPath,"test-frame-"+DateTime.Now.ToString("yyyyMMdd-HHmmss-fff")+".png"); Application.CaptureScreenshot(path); Logger.LogInfo("TEST: screenshot " + path + " render="+Screen.width+"x"+Screen.height); }
+            else if (key == "resolution_height") { int h=(int)value;if(h==720 || h==900 || h==1080 || h==2160)Screen.SetResolution(h*16/9,h,false); }
+            else if (key == "pan_x") { int x=(int)value; if(x<=0 && x>=-2400)SetWindowPos(GameWindow(),IntPtr.Zero,x,0,0,0,0x0001|0x0004); }
+            else if (key == "pan_y") { int y=(int)value; if(y<=0 && y>=-1500)SetWindowPos(GameWindow(),IntPtr.Zero,0,y,0,0,0x0001|0x0004); }
+            else if (key == "loss_pct") { testLossPercent = Math.Max(0f, Math.Min(100f, value)); Logger.LogInfo("TEST: packet loss set to " + testLossPercent + " %"); }
+            else if (key == "drop_s") { testDropUntil = now + Math.Max(0f, value); Logger.LogInfo("TEST: outgoing packets DROPPED for " + (int)value + " s"); }
+            else if (key == "extrap") { extrapolateOn = value > 0f; Logger.LogInfo("TEST: unit extrapolation " + (extrapolateOn ? "ON" : "OFF")); }
+            else if (key == "posch") { if (posSideChannel != null) posSideChannel.Value = value > 0f; Logger.LogInfo("TEST: position side channel " + (value > 0f ? "ON" : "OFF")); }
+            else if (key == "hol_s") { testHolUntil = now + Math.Max(0f, value); Logger.LogInfo("TEST: main stream held (side channel keeps flowing) for " + (int)value + " s"); }
+            else if (key == "auth") { posWins = value > 0f; Logger.LogInfo("TEST: side channel wins over game sync " + (posWins ? "ON" : "OFF")); }
+            else if (key == "stall_s") { testStallUntil = now + Math.Max(0f, value); Logger.LogInfo("TEST: outgoing packets held for " + (int)value + " s"); }
+            else if (key == "jitter_ms") { testJitterSeconds = Math.Max(0f, value) / 1000f; Logger.LogInfo("TEST: random extra delay 0.." + (int)value + " ms"); }
+            else if (key == "posrate") { PosInterval = 1f / Mathf.Clamp(value, 5f, 30f); Logger.LogInfo("TEST: side channel rate " + (1f / PosInterval).ToString("F0") + " Hz"); PtLog("TEST posrate " + (1f / PosInterval).ToString("F0") + " Hz"); }
+            else if (key == "rotch") { if (rotSideChannel != null) rotSideChannel.Value = value > 0f; Logger.LogInfo("TEST: rotation on side channel " + (value > 0f ? "ON" : "OFF")); }
+            else if (key == "main_delay_ms") { testMainDelaySeconds = Math.Max(0f, value) / 1000f; Logger.LogInfo("TEST: main stream only delayed by " + (int)value + " ms (side channel not)"); }
+            else if (key == "freeze_ms") { testFreezeMs = (int)Math.Max(0f, Math.Min(10000f, value)); Logger.LogInfo("TEST: main thread freeze " + testFreezeMs + " ms on the next frame"); }
+            else if (key == "fullresync") { if (prFullCfg != null) prFullCfg.Value = value > 0f; Logger.LogInfo("TEST: full re-send " + (value > 0f ? "ON" : "OFF")); PtLog("TEST fullresync " + (value > 0f ? "ON" : "OFF")); }
+            else if (key == "timersync") { if (tsCfg != null) tsCfg.Value = value > 0f; Logger.LogInfo("TEST: timer sync " + (value > 0f ? "ON" : "OFF")); PtLog("TEST timersync " + (value > 0f ? "ON" : "OFF")); }
+            else if (key == "smooth") { SmSetMode((int)value); Logger.LogInfo("TEST: smoothing " + (value < 0 ? "auto" : value == 0 ? "off" : (int)value + " ms")); }
+            else Logger.LogWarning("TEST: unknown control key " + key);
+        }
         // Every frame: send what is due, in order.
+        static int testFreezeMs;
         void TestFlush()
         {
+            if (testFreezeMs > 0) { int ms = testFreezeMs; testFreezeMs = 0; PtLog("TEST freeze " + ms + " ms start"); System.Threading.Thread.Sleep(ms); PtLog("TEST freeze end"); }
             if (held.Count == 0) return;
             float now = Time.realtimeSinceStartup;
             int sent = 0;
@@ -112,14 +140,7 @@ namespace CastleStorySteam
                             string line = raw.Trim(); int eq = line.IndexOf('='); if (eq < 0) continue;
                             string key = line.Substring(0, eq).Trim(); float value;
                             if (!Single.TryParse(line.Substring(eq + 1).Trim(), out value)) continue;
-                            if (key == "delay_ms") { testDelaySeconds = Math.Max(0f, value) / 1000f; Logger.LogInfo("TEST: delay set to " + (int)value + " ms"); }
-                            else if (key == "loss_pct") { testLossPercent = Math.Max(0f, Math.Min(100f, value)); Logger.LogInfo("TEST: packet loss set to " + testLossPercent + " %"); }
-                            else if (key == "drop_s") { testDropUntil = now + Math.Max(0f, value); Logger.LogInfo("TEST: outgoing packets DROPPED for " + (int)value + " s"); }
-                            else if (key == "extrap") { extrapolateOn = value > 0f; Logger.LogInfo("TEST: unit extrapolation " + (extrapolateOn ? "ON" : "OFF")); }
-                            else if (key == "posch") { if (posSideChannel != null) posSideChannel.Value = value > 0f; Logger.LogInfo("TEST: position side channel " + (value > 0f ? "ON" : "OFF")); }
-                            else if (key == "hol_s") { testHolUntil = now + Math.Max(0f, value); Logger.LogInfo("TEST: main stream held (side channel keeps flowing) for " + (int)value + " s"); }
-                            else if (key == "auth") { posWins = value > 0f; Logger.LogInfo("TEST: side channel wins over game sync " + (posWins ? "ON" : "OFF")); }
-                            else if (key == "stall_s") { testStallUntil = now + Math.Max(0f, value); Logger.LogInfo("TEST: outgoing packets held for " + (int)value + " s"); }
+                            ApplyTestControl(key, value, now);
                         }
                     }
                 }

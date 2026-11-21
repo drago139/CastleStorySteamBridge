@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Threading;
 using BepInEx.Configuration;
 using Brix.Game;
 using UnityEngine;
@@ -15,10 +16,14 @@ namespace CastleStorySteam
     // and how many components the game clock ticks every frame. Counting walks the networked object list once a minute (a few ms).
     public sealed partial class SteamBridgePlugin
     {
-        ConfigEntry<bool> periodicStats; float nextStats, statsLastTime; int statsLastFrame, statsLastGc; static FieldInfo[] clockFields; static object clockInstance; static bool clockTried;
+        ConfigEntry<bool> periodicStats; float nextStats, statsLastTime; int statsLastFrame, statsLastGc; static FieldInfo[] clockFields; static FieldInfo clockInstField; static object clockInstance; static bool clockTried;
+        string statsGameDir;
+        volatile string statsComputerState = "sys[pending]";
+        int statsProbeBusy;
 
         void InstallPeriodicStats()
         {
+            statsGameDir = Application.dataPath;
             try { periodicStats = Config.Bind("Diag", "PeriodicStats", true, "Write a STATS line to the log once a minute during a match (fps, memory, object counts) to help find what makes a long match slow."); }
             catch (Exception) { }
         }
@@ -46,9 +51,10 @@ namespace CastleStorySteam
                         if (ni.GetComponent<Brix.Game.AI.Labor>() != null) labors++;
                     }
                 List<KeyValuePair<string, int>> top = new List<KeyValuePair<string, int>>(kinds); top.Sort(delegate(KeyValuePair<string, int> a, KeyValuePair<string, int> b) { return b.Value.CompareTo(a.Value); });
+                QueueComputerState();
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
                 for (int i = 0; i < top.Count && i < 8; i++) sb.Append(' ').Append(top[i].Key).Append(" x").Append(top[i].Value);
-                Logger.LogInfo("STATS t=" + (int)now + "s fps=" + (dt > 0 ? frames / dt : 0).ToString("F0") + " heap=" + (GC.GetTotalMemory(false) >> 20) + "MB gc0+" + gcDelta + " netObjects=" + total + " labor=" + labors + " clock[" + ClockCounts() + "] guests=" + guests.Count + " " + ComputerState() + " " + AllocReport() + " " + PosLossReport() + " " + LinkPathNow() + " top:" + sb);
+                Logger.LogInfo("STATS t=" + (int)now + "s fps=" + (dt > 0 ? frames / dt : 0).ToString("F0") + " heap=" + (GC.GetTotalMemory(false) >> 20) + "MB gc0+" + gcDelta + " netObjects=" + total + " labor=" + labors + " clock[" + ClockCounts() + "] guests=" + guests.Count + " " + statsComputerState + " " + AllocReport() + " " + PosLossReport() + " " + LinkPathNow() + " top:" + sb);
             }
             catch (Exception e) { Logger.LogWarning("Periodic stats failed: " + e.Message); }
         }
@@ -72,13 +78,28 @@ namespace CastleStorySteam
             return "?";
         }
 
-        static string ComputerState()
+        void QueueComputerState()
+        {
+            if (Interlocked.CompareExchange(ref statsProbeBusy, 1, 0) != 0) return;
+            string dir = statsGameDir;
+            try
+            {
+                if (!ThreadPool.QueueUserWorkItem(delegate(object unused)
+                {
+                    try { statsComputerState = ComputerState(dir); }
+                    catch (Exception) { statsComputerState = "sys[probe failed]"; }
+                    finally { Interlocked.Exchange(ref statsProbeBusy, 0); }
+                })) Interlocked.Exchange(ref statsProbeBusy, 0);
+            }
+            catch (Exception) { Interlocked.Exchange(ref statsProbeBusy, 0); }
+        }
+
+        // Worker only. STATS uses the previous completed sample (first sample is pending).
+        static string ComputerState(string gameDir)
         {
             System.Text.StringBuilder sb = new System.Text.StringBuilder("sys[");
             try { MemStatus m = new MemStatus(); m.dwLength = (uint)Marshal.SizeOf(typeof(MemStatus)); if (GlobalMemoryStatusEx(ref m)) sb.Append("ramFree=" + (m.ullAvailPhys >> 20) + "/" + (m.ullTotalPhys >> 20) + "MB pageFree=" + (m.ullAvailPageFile >> 20) + "MB "); } catch (Exception) { }
             try { ProcMem pm; if (GetProcessMemoryInfo(GetCurrentProcess(), out pm, (uint)Marshal.SizeOf(typeof(ProcMem)))) sb.Append("gameRam=" + (pm.WorkingSetSize.ToUInt64() >> 20) + "MB "); } catch (Exception) { }
-            string gameDir = null;
-            try { gameDir = Path.GetFullPath(Application.dataPath); } catch (Exception) { }
             try
             {
                 string sysRoot = Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System));
@@ -90,10 +111,11 @@ namespace CastleStorySteam
             {
                 if (gameDir != null)
                 {
-                    string tmp = Path.Combine(gameDir, "bridge-disktest.tmp"); byte[] buf = new byte[4096];
+                    string tmp = Path.Combine(gameDir, "bridge-disktest-" + Guid.NewGuid().ToString("N") + ".tmp"); byte[] buf = new byte[4096];
                     System.Diagnostics.Stopwatch w = System.Diagnostics.Stopwatch.StartNew();
-                    using (FileStream fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { fs.Write(buf, 0, buf.Length); fs.Flush(); }
-                    w.Stop(); try { File.Delete(tmp); } catch (Exception) { }
+                    try { using (FileStream fs = new FileStream(tmp, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough)) { fs.Write(buf, 0, buf.Length); fs.Flush(); } }
+                    finally { try { File.Delete(tmp); } catch (Exception) { } }
+                    w.Stop();
                     sb.Append("diskWrite=" + w.ElapsedMilliseconds + "ms");
                 }
             }
@@ -107,13 +129,15 @@ namespace CastleStorySteam
                 if (!clockTried)
                 {
                     clockTried = true;
-                    FieldInfo inst = typeof(GameClock).GetField("instance", BindingFlags.Static | BindingFlags.NonPublic);
-                    clockInstance = inst != null ? inst.GetValue(null) : null;
+                    clockInstField = typeof(GameClock).GetField("instance", BindingFlags.Static | BindingFlags.NonPublic);
                     List<FieldInfo> l = new List<FieldInfo>();
                     foreach (string n in new string[] { "UpdateSig", "FixedUpdateSig", "LateUpdateSig", "SlowUpdateSig_50", "SlowUpdateSig_100", "SlowUpdateSig_200", "SlowUpdateSig_500", "SlowUpdateSig_1s" })
                     { FieldInfo f = typeof(GameClock).GetField(n, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public); if (f != null) l.Add(f); }
                     clockFields = l.ToArray();
                 }
+                // 0.4.27 review: GameClock.instance is a new object in every match (its OnDestroy sets the static to null); the object cached at the first STATS line made clock[...] show the dead
+                // clock of the first match (U=0 FixedU=0 ...) in every later match of the same game run (real logs 2026-11-07). Read the static each time (once a minute).
+                clockInstance = clockInstField != null ? clockInstField.GetValue(null) : null;
                 if (clockInstance == null || clockFields == null) return "n/a";
                 System.Text.StringBuilder sb = new System.Text.StringBuilder();
                 for (int i = 0; i < clockFields.Length; i++)

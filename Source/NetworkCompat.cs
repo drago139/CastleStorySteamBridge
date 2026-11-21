@@ -90,7 +90,7 @@ namespace CastleStorySteam
         {
             if (UnityEngine.Time.realtimeSinceStartup < nextPresenceLog || presenceLogs >= 30) return;
             nextPresenceLog = UnityEngine.Time.realtimeSinceStartup + 10f; presenceLogs++;
-            Logger.LogInfo("Friends in Castle Story: " + summary + "; advertised to the list: " + advertised.Count);
+            Logger.LogInfo("Friends in Castle Story: " + summary + "; advertised to the list: " + advertised.Count + "; own Steam status=" + OwnSteamStatusText());
         }
     }
 }

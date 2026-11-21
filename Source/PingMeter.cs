@@ -47,6 +47,8 @@ namespace CastleStorySteam
             public readonly Dictionary<uint, long> Out = new Dictionary<uint, long>();
             public float FirstSentAt, LastSpikeLog, LastReplyAt;
             public bool Answered;
+            // 0.4.5: probes that passed the 8 s limit stay here until their (late) answer arrives; log only, the shown numbers do not use it
+            public readonly LinkRules.Ledger Late = new LinkRules.Ledger(700, 600000.0, TickMs);
         }
 
         readonly Dictionary<CSteamID, PingPeer> pings = new Dictionary<CSteamID, PingPeer>();
@@ -94,6 +96,7 @@ namespace CastleStorySteam
                 if ((now - kv.Value) * TickMs > PingLostSeconds * 1000.0) pingExpired.Add(kv.Key);
             foreach (uint key in pingExpired)
             {
+                long sentTs; if (p.Out.TryGetValue(key, out sentTs)) p.Late.Expired(key, sentTs, now);
                 p.Out.Remove(key);
                 if ((key & 1) == 0) p.Reliable.Lost++; else p.Unreliable.Lost++;
             }
@@ -136,7 +139,12 @@ namespace CastleStorySteam
                 uint seq = BitConverter.ToUInt32(payload, 1);
                 long ts = BitConverter.ToInt64(payload, 5), sent;
                 uint key = (seq << 1) | mode;
-                if (!p.Out.TryGetValue(key, out sent) || sent != ts) return;      // answered too late (counted as lost) or a duplicate
+                if (!p.Out.TryGetValue(key, out sent) || sent != ts)
+                {
+                    double lateMs;      // answered too late (counted as lost) or a duplicate: the ledger keeps the true round trip (0.4.5, log only)
+                    p.Late.Answer(key, ts, System.Diagnostics.Stopwatch.GetTimestamp(), out lateMs);
+                    return;
+                }
                 p.Out.Remove(key);
                 float ms = (float)((System.Diagnostics.Stopwatch.GetTimestamp() - ts) * TickMs);
                 (mode == 0 ? p.Reliable : p.Unreliable).Add(ms);
@@ -206,6 +214,7 @@ namespace CastleStorySteam
                 sb.AppendLine("  " + PingName(kv.Key) + " [" + PingLink(kv.Key) + "]");
                 sb.AppendLine("    надійний:   " + PingLong(p.Reliable, false));
                 sb.AppendLine("    ненадійний: " + PingLong(p.Unreliable, true));
+                if (p.Late.LateCount > 0) sb.AppendLine("    пізні відповіді (після " + (int)PingLostSeconds + " с): " + p.Late.LateCount + ", найдовша " + (p.Late.LateMaxMs / 1000.0).ToString("F1") + " с, остання " + (p.Late.LateLastMs / 1000.0).ToString("F1") + " с");
                 if (!p.Answered && Time.realtimeSinceStartup - p.FirstSentAt > 10f) sb.AppendLine("    " + MissingPingReason(kv.Key));
             }
         }
@@ -225,10 +234,15 @@ namespace CastleStorySteam
                     PingPeer p = kv.Value;
                     if (p.Answered && !PingIsFresh(kv.Key)) { pingUi.Add(PingName(kv.Key) + ": немає свіжої відповіді; останній пінг " + p.Reliable.Last.ToString("F0") + " мс"); continue; }
                     if (!p.Answered && now - p.FirstSentAt > 10f) { pingUi.Add(PingName(kv.Key) + ": " + MissingPingReason(kv.Key)); continue; }
-                    pingUi.Add(PingName(kv.Key) + " [" + PingLink(kv.Key) + "]: надійний " + PingShort(p.Reliable) + "; ненадійний " + PingShort(p.Unreliable)
+                    // 0.4.5: a dead reliable channel used to look like "-" or like a fresh line (the unreliable probe still answers): say it, with the age
+                    string relText = PingShort(p.Reliable);
+                    float relAge = p.Reliable.Received > 0 ? now - p.Reliable.LastReplyAt : now - p.FirstSentAt;
+                    if (relAge > PingLostSeconds) relText = "НЕМАЄ ВІДПОВІДІ вже " + relAge.ToString("F0") + " с" + (p.Reliable.Received > 0 ? " (останній " + p.Reliable.Last.ToString("F0") + " мс)" : "");
+                    pingUi.Add(PingName(kv.Key) + " [" + PingLink(kv.Key) + "]: надійний " + relText + "; ненадійний " + PingShort(p.Unreliable)
                         + (p.Unreliable.Lost > 0 ? "; втрати " + p.Unreliable.Lost : ""));
                 }
             }
             for (int i = 0; i < pingUi.Count; i++) GUILayout.Label(pingUi[i]);
+            string sm = SmStatusLine(); if (sm != null) GUILayout.Label(sm);
         }    }
 }

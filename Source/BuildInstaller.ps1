@@ -1,8 +1,8 @@
 ﻿$ErrorActionPreference = 'Stop'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $root = Split-Path $PSScriptRoot -Parent
-$output = Join-Path $root 'CastleStory-Steam-Setup-0.3.60-SingleFile.exe'
-$resources = @('bridge.dll','bridge.dll.sig','runtime.zip','capturethepumpkin.zip','halloween2017.zip','uk.csv','uk.json') | ForEach-Object { '/resource:' + (Join-Path $root ('Components\' + $_)) + ',' + $_ }
+$output = Join-Path $root 'CastleStory-Steam-Setup-0.4.28-SingleFile.exe'
+$resources = @('bridge.dll','bridge.dll.sig','runtime.zip','uk.csv','uk.json') | ForEach-Object { '/resource:' + (Join-Path $root ('Components\' + $_)) + ',' + $_ }
 $appFolder=Join-Path $root 'DesktopApp'
 New-Item -ItemType Directory -Path $appFolder -Force | Out-Null
 $app=Join-Path $appFolder 'CastleStory-Steam-App.exe'

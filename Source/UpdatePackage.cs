@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 
 namespace CastleStorySteam
 {
-    internal static class BridgeVersion { internal const string Text = "0.3.60"; }
+    internal static class BridgeVersion { internal const string Text = "0.4.28"; internal const string Build = "B20261114-175344"; }
 
     // Signature check for bridge updates. The signed bytes are "<version>\0<dll bytes>", so a signed old DLL
     // cannot be re-labelled as a newer version.
@@ -54,7 +54,9 @@ namespace CastleStorySteam
     // Update package = version + dll + signature, sent in numbered chunks over the existing bridge link.
     internal static class UpdatePackage
     {
-        internal const int MaxBytes = 512 * 1024, ChunkBytes = 16 * 1024, HeaderBytes = 12;
+        // 0.3.89: was 512 KB. The old cap blocked every feature (plugin was at 521 KB). 32 MB is still a hard ceiling because the receiver allocates
+        // 'total' bytes announced by the sender before the signature can be checked. Peers on <= 0.3.86 keep rejecting packages above 512 KB.
+        internal const int MaxBytes = 32 * 1024 * 1024, ChunkBytes = 16 * 1024, HeaderBytes = 12;
 
         internal static byte[] Build(string version, byte[] dll, byte[] sig)
         {

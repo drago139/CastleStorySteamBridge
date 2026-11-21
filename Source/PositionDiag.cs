@@ -23,6 +23,10 @@ namespace CastleStorySteam
         static readonly Dictionary<UNetTransform, SideRec> sideRecs = new Dictionary<UNetTransform, SideRec>();
         static bool posWins = true;
         static int dgSidePk, dgSideApplied, dgGameWrites, dgOverwrites, dgRejected; static double dgOverDist;
+        // 0.3.83: the same bookkeeping for the rotation (B-009). A stream rotation that differs from a side-channel rotation written in the last 0.5 s is older: put back.
+        sealed class SideRot { internal Quaternion Val; internal float T; }
+        static readonly Dictionary<UNetTransform, SideRot> sideRots = new Dictionary<UNetTransform, SideRot>();
+        static int dgRotGame, dgRotRejected; static double dgRotOverDeg; int pstRotGame, pstRotRej; double pstRotDeg;
         ConfigEntry<bool> posWinsCfg;
         StreamWriter traceW; long nextTraceMs; float nextPst; int pstSidePk, pstApplied, pstGame, pstOver, pstRej; double pstDist;
         readonly Dictionary<UNetTransform, NetworkIdentity> trcNi = new Dictionary<UNetTransform, NetworkIdentity>();
@@ -43,10 +47,28 @@ namespace CastleStorySteam
             if (sideRecs.Count > 2048) { List<UNetTransform> dead = new List<UNetTransform>(); foreach (UNetTransform k in sideRecs.Keys) if (k == null) dead.Add(k); for (int i = 0; i < dead.Count; i++) sideRecs.Remove(dead[i]); }
         }
 
+        static void RotRecord(UNetTransform t, Quaternion q)
+        {
+            SideRot r; if (!sideRots.TryGetValue(t, out r)) { r = new SideRot(); sideRots[t] = r; }
+            r.Val = q; r.T = Time.realtimeSinceStartup;
+            if (sideRots.Count > 2048) { List<UNetTransform> dead = new List<UNetTransform>(); foreach (UNetTransform k in sideRots.Keys) if (k == null) dead.Add(k); for (int i = 0; i < dead.Count; i++) sideRots.Remove(dead[i]); }
+        }
+
+        static void AfterRotDeserialize(UNetTransform t)
+        {
+            if (getServerRot == null) return;
+            SideRot r; if (!sideRots.TryGetValue(t, out r)) return;
+            Quaternion cur = getServerRot(t); float ang = Quaternion.Angle(cur, r.Val);
+            if (ang <= 0.01f) return;
+            dgRotGame++;
+            if (RotationRules.SideWins(Time.realtimeSinceStartup, r.T, true, ang)) { dgRotOverDeg += ang; setServerRot(t, r.Val); dgRotRejected++; }
+        }
+
         static void AfterTransformDeserialize(UNetTransform __instance, bool initialState)
         {
             try
             {
+                if (!initialState && !NetworkServer.active) AfterRotDeserialize(__instance);
                 if (initialState || NetworkServer.active || getServerPos == null) return;
                 SideRec r; if (!sideRecs.TryGetValue(__instance, out r)) return;
                 Vector3 cur = getServerPos(__instance); if (cur == r.Val) return;
@@ -65,10 +87,10 @@ namespace CastleStorySteam
             if (!TestOn) return;
             long ms = (long)(DateTime.UtcNow - ActEpoch).TotalMilliseconds;
             if (traceW == null) { try { traceW = new StreamWriter(Path.Combine(BepInEx.Paths.BepInExRootPath, "unit-trace.txt"), false); } catch (Exception) { return; } }
-            if (nextTraceMs == 0) nextTraceMs = (ms / 250 + 1) * 250;
+            if (nextTraceMs == 0) nextTraceMs = (ms / 100 + 1) * 100;
             if (ms >= nextTraceMs)
             {
-                long stamp = nextTraceMs; nextTraceMs = (ms / 250 + 1) * 250;
+                long stamp = nextTraceMs; nextTraceMs = (ms / 100 + 1) * 100;
                 System.Text.StringBuilder sb = new System.Text.StringBuilder("TRC ").Append(stamp);
                 for (int i = 0; i < posRegistry.Count; i++)
                 {
@@ -77,14 +99,16 @@ namespace CastleStorySteam
                     if (!unit) continue;
                     NetworkIdentity ni; if (!trcNi.TryGetValue(t, out ni)) { ni = t.GetComponent<NetworkIdentity>(); trcNi[t] = ni; }
                     if (ni == null || ni.netId.Value == 0) continue;
-                    Vector3 p = t.transform.position; sb.Append(' ').Append(ni.netId.Value).Append(':').Append(p.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(p.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+                    Vector3 p = t.transform.position; Vector3 f = t.transform.forward; float yaw = Mathf.Atan2(f.x, f.z) * Mathf.Rad2Deg;   // 0.3.83: drawn facing (B-009 analysis)
+                    sb.Append(' ').Append(ni.netId.Value).Append(':').Append(p.x.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(p.z.ToString("F2", System.Globalization.CultureInfo.InvariantCulture)).Append(',').Append(yaw.ToString("F0", System.Globalization.CultureInfo.InvariantCulture));
                 }
                 traceW.WriteLine(sb.ToString());
             }
             if (now >= nextPst)
             {
                 nextPst = now + 1f;
-                traceW.WriteLine("PST " + ms + " side=" + (dgSidePk - pstSidePk) + " applied=" + (dgSideApplied - pstApplied) + " game=" + (dgGameWrites - pstGame) + " over=" + (dgOverwrites - pstOver) + " rej=" + (dgRejected - pstRej) + " overDist=" + (dgOverDist - pstDist).ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
+                traceW.WriteLine("PST " + ms + " side=" + (dgSidePk - pstSidePk) + " applied=" + (dgSideApplied - pstApplied) + " game=" + (dgGameWrites - pstGame) + " over=" + (dgOverwrites - pstOver) + " rej=" + (dgRejected - pstRej) + " overDist=" + (dgOverDist - pstDist).ToString("F2", System.Globalization.CultureInfo.InvariantCulture) + " rotGame=" + (dgRotGame - pstRotGame) + " rotRej=" + (dgRotRejected - pstRotRej) + " rotOverDeg=" + (dgRotOverDeg - pstRotDeg).ToString("F0", System.Globalization.CultureInfo.InvariantCulture));
+                pstRotGame = dgRotGame; pstRotRej = dgRotRejected; pstRotDeg = dgRotOverDeg;
                 pstSidePk = dgSidePk; pstApplied = dgSideApplied; pstGame = dgGameWrites; pstOver = dgOverwrites; pstRej = dgRejected; pstDist = dgOverDist;
                 traceW.Flush();
             }

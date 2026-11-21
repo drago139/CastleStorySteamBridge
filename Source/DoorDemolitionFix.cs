@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using Brix.Engine;
 using Brix.External.Signals;
@@ -55,7 +55,7 @@ internal static class DoorDemolitionFix
     {
         if(TargetGone(work))return Node.Empty;
         if(work.Worker==null)return Node.FailWork<Exceptions.NullLabor>();
-        if(!work.Worker.Profession.CanBreakVoxels())return Node.FailWork<Exceptions.CharacterCantDig>();
+        if(!work.Worker.Profession.CanBreakVoxels()){Why("worker "+work.Worker.name+" ("+work.Worker.Occupation.CurrentOccupation+") cannot break voxels -> work refused for "+work.Target.name);return Node.FailWork<Exceptions.CharacterCantDig>();}
         Work old=reservations.Owner(work.TargetId) as Work;
         if(old!=null&&(TargetGone(old)||old.Worker==null||old.Worker.IsNullOrReleased()))End(old);
         if(!reservations.TryAcquire(work.TargetId,work))
@@ -76,8 +76,12 @@ internal static class DoorDemolitionFix
         Work current;
         if(active.TryGetValue(work.WorkerId,out current)&&ReferenceEquals(current,work))active.Remove(work.WorkerId);
     }
+    static readonly HashSet<string> logged=new HashSet<string>();
+    static void Why(string text){ if(note!=null&&logged.Count<60&&logged.Add(text))note("Door demolition: "+text); }
     static void AfterBreak(Labor labor,GameComponent gameComponent,ref Node __result)
     {
+        if(gameComponent!=null&&labor!=null&&gameComponent.GetComponent<Porte>()!=null)
+            Why("BreakObject on "+gameComponent.name+" by "+labor.name+" ("+labor.Occupation.CurrentOccupation+") enabled="+(enabled!=null&&enabled())+" server="+NetworkServer.active+" volume="+(gameComponent.volume!=null)+" registered="+(gameComponent.volume!=null&&gameComponent.volume.Registered)+" active="+gameComponent.gameObject.activeInHierarchy+" node="+(__result!=null));
         if(__result==null||labor==null||!Eligible(gameComponent))return;
         Work work=new Work{Worker=labor,Target=gameComponent,WorkerId=labor.gameObject.GetInstanceID(),TargetId=gameComponent.gameObject.GetInstanceID()};
         Node nativeWork=new ConditionNode.ConditionalNodeBuilder(__result,true,false,null).Condition((Func<Work,bool>)TargetGone,work).ToNode;
@@ -85,13 +89,33 @@ internal static class DoorDemolitionFix
     }
     static Node Identity(Node node) { return node; }
     static bool TargetGone(Work work) { return work.TargetReleased||work.Target==null||work.Target.IsNullOrReleased(); }
-    static bool SideCell(GameObject worker,GameObject target,XYZ cell)
+    // 0.4.22 DOOR-ATTACK (DoorAttackFix.cs): a live melee order on an ENEMY door is a second source of side-cell work (host only, own switch).
+    internal static Func<GameObject,GameObject,bool> CombatReady;
+    static bool CombatWork(GameObject worker,GameObject target){ Func<GameObject,GameObject,bool> f=CombatReady; return f!=null&&f(worker,target); }
+    internal static bool SideCellFor(GameObject worker,GameObject target,XYZ cell) { return SideCell(worker,target,cell); }
+    // geometry only (no work gate): for the DOOR-ATTACK side-candidate log line written before the order starts
+    internal static bool SideGeometry(GameObject worker,IVolume volume,XYZ cell)
     {
-        if(!InWork(worker,target))return false;
-        IVolume volume=target.GetComponent<IVolume>();
-        if(volume==null||volume.HasPropertyAt(VProperty.occupy,cell))return false;
+        if(worker==null||volume==null||volume.HasPropertyAt(VProperty.occupy,cell))return false;
         int bottom=int.MaxValue;
         foreach(XYZ occupied in volume.GetCases(VProperty.occupy))if(occupied.y<bottom)bottom=occupied.y;
+        if(cell.y!=bottom)return false;
+        bool adjacent=false;
+        foreach(XYZ occupied in volume.GetCases(VProperty.occupy))
+            if(DoorApproachRules.FaceAdjacent(cell.x,cell.y,cell.z,occupied.x,occupied.y,occupied.z)){adjacent=true;break;}
+        return adjacent&&Voxel.IsOpenAndWalkable(cell)&&!SearchPathRequest.HasBlockerAt(worker,cell)&&!SearchPathRequest.HasBlockerAt(worker,cell+XYZ.up);
+    }
+    static bool SideCell(GameObject worker,GameObject target,XYZ cell)
+    {
+        bool demolition=InWork(worker,target);
+        if(!demolition&&!CombatWork(worker,target))return false;
+        IVolume volume=target.GetComponent<IVolume>();
+        if(volume==null)return false;
+        int bottom=int.MaxValue;
+        foreach(XYZ occupied in volume.GetCases(VProperty.occupy))if(occupied.y<bottom)bottom=occupied.y;
+        // combat path only: A* / BFS nodes may report the cell under the feet (native access rows are bottom and bottom-1); the demolition path keeps its 0.4.17 rule
+        if(!demolition)cell=new XYZ(cell.x,CastleStorySteam.DoorAttackRules.NormalizeStandY(cell.y,bottom),cell.z);
+        if(volume.HasPropertyAt(VProperty.occupy,cell))return false;
         if(cell.y!=bottom)return false;
         bool adjacent=false;
         foreach(XYZ occupied in volume.GetCases(VProperty.occupy))
@@ -114,7 +138,7 @@ internal static class DoorDemolitionFix
         foreach(XYZ occupied in volume.GetCases(VProperty.occupy))if(occupied.y==bottom)
             foreach(XYZ direction in directions)if(!volume.HasPropertyAt(VProperty.occupy,occupied+direction))cells.Add(occupied+direction);
         string text="Door side candidates: "+work.Target.name+" bottom="+bottom+" worker="+work.Worker.voxel.position;
-        foreach(XYZ cell in cells)text+=" ["+cell+" open="+Voxel.IsOpenAndWalkable(cell)+" blocker="+SearchPathRequest.HasBlockerAt(work.Worker.gameObject,cell)+" allowed="+SideCell(work.Worker.gameObject,work.Target.gameObject,cell)+"]";
+        foreach(XYZ cell in cells)text+=" ["+cell+" nonEmpty="+Voxel.IsNonEmpty(cell)+" full="+Voxel.IsFull(cell)+" upNonEmpty="+Voxel.IsNonEmpty(cell+XYZ.up)+" open="+Voxel.IsOpenAndWalkable(cell)+" blocker="+SearchPathRequest.HasBlockerAt(work.Worker.gameObject,cell)+" allowed="+SideCell(work.Worker.gameObject,work.Target.gameObject,cell)+"]";
         note(text);
     }
     static void AfterTargetReached(ObjectLocation __instance,GameObject source,Vector3 position,ref bool __result)
@@ -129,7 +153,7 @@ internal static class DoorDemolitionFix
     {
         __state=boundsTarget; boundsTarget=null;
         if(__instance!=null&&__instance.Location is ObjectLocation&&__instance.Navigation!=null&&
-            InWork(__instance.Navigation.gameObject,__instance.Location.Object))boundsTarget=__instance.Location.Object;
+            (InWork(__instance.Navigation.gameObject,__instance.Location.Object)||CombatWork(__instance.Navigation.gameObject,__instance.Location.Object)))boundsTarget=__instance.Location.Object;
     }
     static Exception AfterSearchBounds(Exception __exception,GameObject __state) { boundsTarget=__state; return __exception; }
     static void AfterBounds(IVolume v,ref VoxelBounds __result)
